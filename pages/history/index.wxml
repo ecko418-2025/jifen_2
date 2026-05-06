@@ -1,0 +1,27 @@
+<view class="container">
+  <view class="header">
+    <text class="back-btn" bindtap="goBack">〈</text>
+    <text class="title">历史房间</text>
+  </view>
+
+  <scroll-view scroll-y class="room-list" refresher-enabled="{{true}}" refresher-triggered="{{loading}}" bindrefresherrefresh="loadHistory">
+    <view class="room-item" wx:for="{{rooms}}" wx:key="room_id" bindtap="enterRoom" data-id="{{item.room_id}}" bindlongpress="onLongPressRoom">
+      <view class="room-main">
+        <view class="room-icon">🈴</view>
+        <view class="room-info">
+          <text class="room-code">房间: {{item.room_code}}</text>
+          <text class="room-date">{{item.date_str}}</text>
+        </view>
+      </view>
+      <view class="room-score {{item.my_score > 0 ? 'pos' : (item.my_score < 0 ? 'neg' : '')}}">
+        {{item.my_score > 0 ? '+' : ''}}{{item.my_score}}
+      </view>
+    </view>
+
+    <view class="empty-tip" wx:if="{{rooms.length === 0 && !loading}}">
+      暂无历史记录
+    </view>
+  </scroll-view>
+
+  <view class="footer-tip">* 长按可以隐藏不再想看到的房间</view>
+</view>

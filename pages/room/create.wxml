@@ -1,0 +1,27 @@
+<view class="container">
+  <view class="header">
+    <text class="title">开启新牌局</text>
+    <text class="desc">输入您的昵称并设置规则</text>
+  </view>
+
+  <view class="form">
+    <view class="avatar-box">
+      <button class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+        <image class="avatar-img" src="{{avatarUrl}}" mode="aspectFill" style="background-color: #252a3d;" />
+      </button>
+      <text class="hint">点击同步微信头像</text>
+    </view>
+
+    <view class="form-item">
+      <text class="label">我的昵称</text>
+      <input class="input" type="nickname" placeholder="请输入您的昵称" value="{{nickname}}" bindinput="onNicknameInput" bindblur="onNicknameBlur" />
+    </view>
+    
+    <view class="form-item">
+      <text class="label">底分</text>
+      <input class="input" type="number" placeholder="默认 1" value="{{baseScore}}" bindinput="onBaseScoreInput" />
+    </view>
+
+    <button class="btn-submit" loading="{{loading}}" bindtap="onCreate">创建房间</button>
+  </view>
+</view>

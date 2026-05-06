@@ -1,0 +1,100 @@
+<view class="lobby">
+  <!-- 顶部：个人成就卡片 -->
+  <view class="user-card">
+    <view class="profile">
+      <button class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+        <image class="avatar" src="{{userInfo.avatarUrl || '/assets/default-avatar.png'}}" mode="aspectFill" />
+      </button>
+      <view class="info">
+        <input type="nickname" class="name-input" placeholder="点击设置昵称" value="{{userInfo.nickname}}" bindblur="onNicknameBlur" />
+      </view>
+    </view>
+
+
+    <view class="record" bindtap="showHistoryStats">
+      <view class="record-left">
+        <text>⚔️ 战绩：胜 {{userInfo.wins}} 次 / 负 {{userInfo.losses}} 次</text>
+        <text class="rate">胜率 {{userInfo.winRate}}%</text>
+      </view>
+      <text class="arrow">详情 ></text>
+    </view>
+  </view>
+
+  <!-- 中部：快速操作 -->
+  <view class="actions">
+    <text class="sub-title">在线记账</text>
+    <view class="btn-row">
+      <view class="main-btn create" bindtap="goToCreate">创建房间</view>
+      <view class="main-btn join" bindtap="joinByScan">扫码加入房间</view>
+    </view>
+    <!-- 新增：手动输入加入 -->
+    <view class="manual-join-row">
+      <input class="manual-input" type="number" placeholder="或输入6位房间号" maxlength="6" 
+             bindinput="onInputRoomCode" value="{{inputRoomCode}}" />
+      <view class="manual-btn" bindtap="enterByCodeManual">立即加入</view>
+    </view>
+  </view>
+
+  <!-- 下部：当前进行的房间 -->
+  <view class="room-list">
+    <view class="list-header">
+      <text>我当前加入的房间</text>
+      <text class="more" bindtap="goToAllHistory">历史 ></text>
+    </view>
+    <view class="room-item" wx:for="{{activeRooms}}" wx:key="room_id"
+          bindlongpress="onLongPressRoom" data-id="{{item.room_id}}">
+      <view class="room-info" bindtap="enterRoom" data-id="{{item.room_id}}">
+        <text class="icon">🈴</text>
+        <view class="room-detail">
+          <text class="code">房间: {{item.room_code}}</text>
+          <text class="date">{{item.date_str}}</text>
+        </view>
+      </view>
+      <view class="enter-link" bindtap="enterRoom" data-id="{{item.room_id}}">立即进入</view>
+    </view>
+    <view class="no-room" wx:if="{{activeRooms.length === 0}}">暂无活跃房间，快去创建吧</view>
+  </view>
+
+  <!-- 战绩详情弹窗 -->
+  <view class="stats-modal" wx:if="{{showStatsDetail}}">
+    <view class="stats-mask" bindtap="hideHistoryStats"></view>
+    <view class="stats-content">
+      <view class="stats-header">
+        <text>个人战报</text>
+        <text class="stats-close" bindtap="hideHistoryStats">×</text>
+      </view>
+      <view class="stats-body">
+        <view class="stats-grid">
+          <view class="grid-item">
+            <text class="grid-val">{{userInfo.totalGames}}</text>
+            <text class="grid-label">总局数</text>
+          </view>
+          <view class="grid-item">
+            <text class="grid-val {{userInfo.totalPoints >= 0 ? 'pos' : 'neg'}}">{{userInfo.totalPoints}}</text>
+            <text class="grid-label">累计总分</text>
+          </view>
+          <view class="grid-item">
+            <text class="grid-val pos">{{userInfo.maxScore}}</text>
+            <text class="grid-label">单局最高</text>
+          </view>
+          <view class="grid-item">
+            <text class="grid-val neg">{{userInfo.minScore}}</text>
+            <text class="grid-label">单局最低</text>
+          </view>
+          <view class="grid-item">
+            <text class="grid-val">{{userInfo.avgScore}}</text>
+            <text class="grid-label">局均得分</text>
+          </view>
+          <view class="grid-item">
+            <text class="grid-val highlight">{{userInfo.winRate}}%</text>
+            <text class="grid-label">综合胜率</text>
+          </view>
+        </view>
+        <view class="stats-tips">* 数据基于全部历史对局（含已删除房间）</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 隐藏的画布，用于头像处理 -->
+  <canvas canvas-id="avatarCanvas" style="position:fixed; left: -9999px; width: 200px; height: 200px;"></canvas>
+</view>

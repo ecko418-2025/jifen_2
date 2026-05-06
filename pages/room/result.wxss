@@ -1,0 +1,76 @@
+.result-container {
+  padding: 60rpx 40rpx;
+  background: #0f111a;
+  min-height: 100vh;
+  color: #fff;
+}
+
+.podium {
+  text-align: center;
+  margin-bottom: 80rpx;
+}
+
+.congrats {
+  font-size: 32rpx;
+  color: #8f94a5;
+}
+
+.winner-card {
+  background: linear-gradient(135deg, #ffcc00, #ff9500);
+  border-radius: 40rpx;
+  padding: 60rpx;
+  margin-top: 40rpx;
+  box-shadow: 0 20rpx 40rpx rgba(255, 149, 0, 0.3);
+  color: #000;
+}
+
+.label {
+  font-size: 24rpx;
+  font-weight: bold;
+  opacity: 0.8;
+  display: block;
+}
+
+.winner-name {
+  font-size: 48rpx;
+  font-weight: bold;
+  display: block;
+  margin: 10rpx 0;
+}
+
+.winner-score {
+  font-size: 60rpx;
+  font-weight: 800;
+}
+
+.section-title {
+  font-size: 26rpx;
+  color: #8f94a5;
+  margin-bottom: 30rpx;
+  display: block;
+}
+
+.transfer-item {
+  background: #1a1d29;
+  padding: 30rpx;
+  border-radius: 20rpx;
+  margin-bottom: 16rpx;
+}
+
+.p-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.from { font-weight: bold; color: #4cd964; }
+.to { font-weight: bold; color: #ff3b30; }
+.arrow { font-size: 24rpx; color: #8f94a5; }
+
+.btn-back {
+  margin-top: 80rpx;
+  background: #3e4459;
+  color: #fff;
+  border-radius: 50rpx;
+  font-size: 30rpx;
+}

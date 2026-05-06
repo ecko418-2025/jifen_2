@@ -1,0 +1,23 @@
+<view class="result-container">
+  <view class="podium">
+    <text class="congrats">🎉 牌局结束</text>
+    <view class="winner-card" wx:if="{{winner}}">
+      <text class="label">大赢家</text>
+      <text class="winner-name">{{winner.nickname}}</text>
+      <text class="winner-score">+{{winner.current_score}}</text>
+    </view>
+  </view>
+
+  <view class="transfer-section">
+    <text class="section-title">💡 最优平账方案 (只需 {{transfers.length}} 次转账)</text>
+    <view wx:for="{{transfers}}" wx:key="index" class="transfer-item">
+      <view class="p-info">
+        <text class="from">{{item.from}}</text>
+        <text class="arrow">支付 ¥{{item.amount}} 给</text>
+        <text class="to">{{item.to}}</text>
+      </view>
+    </view>
+  </view>
+
+  <button class="btn-back" bindtap="goHome">回到首页</button>
+</view>

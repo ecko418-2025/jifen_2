@@ -1,0 +1,95 @@
+.container {
+  min-height: 100vh;
+  background: #f8f8f8;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  height: 88rpx;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  padding: 0 30rpx;
+  border-bottom: 1rpx solid #eee;
+}
+
+.back-btn {
+  font-size: 40rpx;
+  color: #333;
+  padding: 20rpx 20rpx 20rpx 0;
+}
+
+.title {
+  flex: 1;
+  text-align: center;
+  font-size: 32rpx;
+  font-weight: bold;
+  margin-right: 40rpx;
+}
+
+.room-list {
+  flex: 1;
+  padding: 20rpx;
+  box-sizing: border-box;
+}
+
+.room-item {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 30rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2rpx 10rpx rgba(0,0,0,0.02);
+}
+
+.room-main {
+  display: flex;
+  align-items: center;
+}
+
+.room-icon {
+  font-size: 40rpx;
+  margin-right: 20rpx;
+}
+
+.room-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.room-code {
+  font-size: 30rpx;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 6rpx;
+}
+
+.room-date {
+  font-size: 24rpx;
+  color: #999;
+}
+
+.room-score {
+  font-size: 32rpx;
+  font-weight: bold;
+}
+
+.pos { color: #27ae60; }
+.neg { color: #e74c3c; }
+
+.empty-tip {
+  text-align: center;
+  color: #999;
+  font-size: 28rpx;
+  margin-top: 100rpx;
+}
+
+.footer-tip {
+  text-align: center;
+  font-size: 22rpx;
+  color: #ccc;
+  padding: 30rpx;
+}

@@ -1,0 +1,31 @@
+<view class="rank-container">
+  <view class="rank-header">
+    <text class="title">🏆 友圈排行榜</text>
+    <text class="subtitle">基于你共同玩过的好友统计</text>
+  </view>
+
+  <view class="rank-list">
+    <view class="rank-item {{item.is_me ? 'is-me' : ''}}" wx:for="{{rankList}}" wx:key="index">
+      <view class="rank-num {{index === 0 ? 'gold' : (index === 1 ? 'silver' : (index === 2 ? 'bronze' : ''))}}">
+        {{index + 1}}
+      </view>
+      <view class="avatar-box">
+        <image class="avatar" src="{{item.avatar || '/assets/default-avatar.png'}}" mode="aspectFill" />
+      </view>
+      <view class="info">
+        <view class="name-row">
+          <text class="name">{{item.nickname}}</text>
+          <text class="me-tag" wx:if="{{item.is_me}}">我</text>
+        </view>
+        <text class="desc">共参与多次对局</text>
+      </view>
+      <view class="score {{item.total_points < 0 ? 'neg' : 'pos'}}">
+        {{item.total_points > 0 ? '+' : ''}}{{item.total_points}}
+      </view>
+    </view>
+  </view>
+
+  <view class="empty" wx:if="{{rankList.length === 0}}">
+    暂无榜单数据，快去开一局吧！
+  </view>
+</view>

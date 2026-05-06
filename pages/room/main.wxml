@@ -1,0 +1,186 @@
+<view class="container">
+  <!-- 1. 顶部导航 -->
+  <view class="nav-header" wx:if="{{currentTab === 'main'}}">
+    <text class="title"></text>
+  </view>
+
+  <!-- 2. 主视图 -->
+  <block wx:if="{{currentTab === 'main'}}">
+    <view class="header">
+      <scroll-view scroll-x class="player-scroll">
+        <view class="player-list">
+          <!-- 玩家列表 -->
+          <view wx:for="{{players}}" wx:key="_id" class="player-item" bindtap="onPlayerClick" data-player="{{item}}">
+            <view class="avatar-wrapper {{item.is_me ? 'is-me' : ''}}">
+              <image wx:if="{{item.avatar}}" src="{{item.avatar}}" class="avatar" />
+              <view wx:else class="avatar-placeholder">{{item.nickname[0]}}</view>
+            </view>
+            <text class="nickname">{{item.nickname}}</text>
+            <text class="score {{item.current_score < 0 ? 'neg' : 'pos'}}">
+              {{item.current_score > 0 ? '+' : ''}}{{item.current_score}}
+            </text>
+          </view>
+          <!-- 台面费快捷项 -->
+          <view class="player-item table-item" bindtap="onTableClick">
+            <view class="avatar-wrapper table-avatar">💰</view>
+            <text class="nickname">台面费</text>
+            <text class="score table-val">{{tableFee}}</text>
+          </view>
+          <view class="player-item add-btn" bindtap="showAddPlayer">
+            <view class="avatar-wrapper plus">+</view>
+            <text class="nickname">添加/邀请</text>
+          </view>
+        </view>
+      </scroll-view>
+      <view class="room-info">
+        <view class="table-balance">台面剩余: <text class="val">{{tableFee}}</text></view>
+        <view class="header-actions">
+          <view class="qr-btn" bindtap="scrollToHistory">历史 📜</view>
+          <view class="qr-btn" bindtap="showQR">二维码 📲</view>
+          <view class="settings" bindtap="onEndGame">结算 📊</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 3. 历史记录 -->
+    <scroll-view scroll-y class="history-list" scroll-top="{{historyScrollTop}}" scroll-with-animation="true">
+      <view class="history-group" wx:for="{{rounds}}" wx:key="groupKey">
+        <view class="time-header">{{item.time_str}}</view>
+        <view class="history-entry" wx:for="{{item.entries}}" wx:for-item="details" wx:key="index">
+          <view class="h-desc-row">
+            <block wx:for="{{details}}" wx:for-item="d" wx:key="name">
+              <text class="h-player-name">{{d.name}}</text>
+              <text class="h-player-val s-{{d.type}}">{{d.text}}</text>
+              <text class="h-sep" wx:if="{{index < details.length - 1}}">, </text>
+            </block>
+          </view>
+        </view>
+      </view>
+      <view class="hint-text" wx:if="{{rounds.length === 0}}">暂无记录</view>
+    </scroll-view>
+  </block>
+
+  <!-- 4. 支出/收入视图 (略) -->
+  <block wx:if="{{currentTab === 'expense' || currentTab === 'income'}}">
+    <view class="input-view">
+      <view class="view-title">
+        <text class="inline-back" bindtap="switchTab" data-tab="main">〈</text>
+        输入你需要{{currentTab === 'expense' ? '支出' : '收入'}}的金额：
+      </view>
+      
+      <scroll-view scroll-y class="input-main-scroll">
+        <view class="quick-tool-bar">
+          <view class="tool-label">快捷填充:</view>
+          <input class="unit-input-field" type="number" placeholder="单份金额" bindinput="onUnitInput" value="{{unitAmount}}" />
+          <view class="multiplier-btn" bindtap="applyMultiplier" data-m="2">两份</view>
+          <view class="multiplier-btn" bindtap="applyMultiplier" data-m="3">三份</view>
+        </view>
+        <view class="player-input-list">
+          <view class="p-input-item" wx:for="{{otherPlayers}}" wx:key="_id">
+            <view class="p-info">
+              <view class="p-avatar-empty">{{item.nickname[0]}}</view>
+              <text>{{item.nickname}}</text>
+            </view>
+            <view class="reset-btn" bindtap="resetToZero" data-id="{{item._id}}">归零</view>
+            <input class="p-val" type="number" placeholder="输入金额" 
+                   bindinput="onBatchInput" data-id="{{item._id}}" value="{{batchScores[item._id]}}" />
+          </view>
+        </view>
+        <view class="p-input-item table-row">
+          <view class="p-info">💰 <text>台面</text></view>
+          <view class="reset-btn" bindtap="resetToZero" data-id="table">归零</view>
+          <view class="table-input-wrap">
+            <input class="p-val" type="number" placeholder="输入金额" 
+                   bindinput="onBatchInput" data-id="table" value="{{batchScores['table']}}" />
+            <view class="plus-ten-btn" bindtap="addTableTen">+10</view>
+          </view>
+        </view>
+        
+        <view class="preview-summary">
+          <text class="p-label">您的变动预览：</text>
+          <text class="p-val {{myPreviewDelta > 0 ? 'pos' : (myPreviewDelta < 0 ? 'neg' : '')}}">{{myPreviewDelta > 0 ? '+' : ''}}{{myPreviewDelta}}</text>
+        </view>
+        <view class="action-btns">
+          <button class="btn-action {{currentTab === 'expense' ? 'btn-red' : 'btn-green'}}" bindtap="submitBatch">
+            {{currentTab === 'expense' ? '支出' : '收入'}}
+          </button>
+          <button class="btn-return" bindtap="switchTab" data-tab="main">返回房间</button>
+        </view>
+      </scroll-view>
+    </view>
+  </block>
+
+  <!-- 5. 结算弹窗 (略) -->
+  <view class="settle-modal" wx:if="{{showSettle}}">
+    <view class="settle-mask" bindtap="hideSettle"></view>
+    <view class="settle-content">
+      <view class="settle-title">本局结算结果</view>
+      <scroll-view scroll-y class="settle-list">
+        <view class="settle-item" wx:for="{{players}}" wx:key="_id">
+          <text class="s-name">{{item.nickname}}</text>
+          <text class="s-score {{item.current_score > 0 ? 's-pos' : (item.current_score < 0 ? 's-neg' : '')}}">
+            {{item.current_score > 0 ? '+' : ''}}{{item.current_score}}
+          </text>
+        </view>
+        <view class="settle-item table-line">
+          <text class="s-name">台面费 (余额)</text>
+          <text class="s-score s-table">{{tableFee}}</text>
+        </view>
+      </scroll-view>
+      <view class="settle-footer">
+        <button class="s-btn-cancel" bindtap="hideSettle">再打一会</button>
+        <button class="s-btn-confirm" bindtap="confirmEndGame">确认结果并退出</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 6. 二维码弹窗 -->
+  <view class="qr-modal" wx:if="{{showQRModal}}">
+    <view class="qr-mask" bindtap="hideQR"></view>
+    <view class="qr-content">
+      <view class="qr-header">
+        <text>让好友扫码进房</text>
+        <text class="qr-close" bindtap="hideQR">×</text>
+      </view>
+      <view class="qr-body">
+        <image wx:if="{{roomQRCode}}" src="{{roomQRCode}}" class="qr-img" show-menu-by-longpress />
+        <view wx:else class="qr-loading">正在生成二维码...</view>
+        <view class="qr-tips">房间号: <text class="code-val">{{roomCode}}</text></view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 7. 底部 TabBar -->
+  <view class="tab-bar">
+    <view class="tab-item {{currentTab === 'main' ? 'active' : ''}}" bindtap="goHome">
+      <text class="tab-icon">🏠</text> <text>首页</text>
+    </view>
+    <view class="tab-item {{currentTab === 'expense' ? 'active' : ''}}" bindtap="switchTab" data-tab="expense">
+      <text class="tab-icon">💸</text> <text>支出</text>
+    </view>
+    <view class="tab-item {{currentTab === 'income' ? 'active' : ''}}" bindtap="switchTab" data-tab="income">
+      <text class="tab-icon">💰</text> <text>收入</text>
+    </view>
+    <view class="tab-item" bindtap="onEndGame">
+      <text class="tab-icon">📊</text> <text>结算</text>
+    </view>
+  </view>
+
+  <!-- 8. 自定义输入弹窗 -->
+  <view class="input-modal" wx:if="{{showInputModal}}">
+    <view class="modal-mask" bindtap="onModalCancel"></view>
+    <view class="modal-content">
+      <view class="modal-header">{{inputModalTitle}}</view>
+      <view class="modal-body">
+        <input class="modal-input" type="{{inputModalType}}" focus="{{true}}" 
+               placeholder="{{inputModalPlaceholder}}" bindinput="onModalInput" 
+               value="{{inputModalValue}}" confirm-type="done" bindconfirm="onModalConfirm"
+               adjust-position="{{false}}" />
+      </view>
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="onModalCancel">取消</view>
+        <view class="modal-btn confirm" bindtap="onModalConfirm">确定</view>
+      </view>
+    </view>
+  </view>
+</view>

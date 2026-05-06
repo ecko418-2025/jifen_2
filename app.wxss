@@ -1,0 +1,96 @@
+/* 基础变量 */
+page {
+  --bg: #0d0f1a;
+  --surface: #161927;
+  --surface2: #1e2236;
+  --border: rgba(255,255,255,0.08);
+  --accent: #6c63ff;
+  --accent2: #ff6584;
+  --accent3: #43e97b;
+  --text: #f0f2ff;
+  --text2: #8b90b0;
+  --win: #43e97b;
+  --lose: #ff6584;
+  --fee: #ffd166;
+  --radius: 16px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica,
+    Segoe UI, Arial, Roboto, 'PingFang SC', 'miui', 'Hiragino Sans GB', 'Microsoft Yahei',
+    sans-serif;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ── Hero Section ── */
+.hero {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  padding: 80rpx 40rpx 60rpx;
+  text-align: center;
+  position: relative;
+}
+.hero-icon { font-size: 100rpx; margin-bottom: 20rpx; display: block; }
+.hero-title { font-size: 56rpx; font-weight: 800; color: #fff; display: block; }
+.hero-subtitle { font-size: 28rpx; color: var(--text2); margin-top: 12rpx; display: block; }
+
+/* ── Card ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 40rpx;
+  margin: 24rpx 32rpx;
+}
+
+/* ── Form ── */
+.form-group { margin-bottom: 32rpx; }
+.form-label { font-size: 24rpx; font-weight: 600; color: var(--text2); text-transform: uppercase; margin-bottom: 16rpx; display: block; }
+.input {
+  width: 100%;
+  background: var(--surface2);
+  border: 3rpx solid var(--border);
+  border-radius: 24rpx;
+  padding: 24rpx 32rpx;
+  color: var(--text);
+  font-size: 32rpx;
+  box-sizing: border-box;
+}
+
+/* ── Buttons ── */
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 100% !important; padding: 28rpx; border: none; border-radius: 24rpx;
+  font-size: 32rpx; font-weight: 700; transition: all .2s;
+  margin: 0;
+}
+.btn-primary { background: linear-gradient(135deg, var(--accent), #9c94ff); color: #fff; }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 3rpx solid var(--border); }
+.btn-hover { opacity: 0.8; transform: scale(0.98); }
+
+/* ── Avatar ── */
+.avatar-upload { display: flex; flex-direction: column; align-items: center; margin-bottom: 40rpx; }
+.avatar-preview {
+  width: 180rpx; height: 180rpx; border-radius: 50%;
+  background: var(--surface2); border: 4rpx dashed var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 64rpx; overflow: hidden;
+}
+.avatar-preview image { width: 100%; height: 100%; }
+.avatar-hint { font-size: 22rpx; color: var(--text2); margin-top: 16rpx; font-weight: 600; }
+
+/* ── Loading ── */
+.btn.loading { color: transparent !important; pointer-events: none; }
+.btn.loading::after {
+  content: ''; position: absolute; width: 40rpx; height: 40rpx;
+  border: 4rpx solid rgba(255,255,255,0.3); border-top-color: #fff;
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Utils ── */
+.mt-16 { margin-top: 32rpx; }
+.disclaimer { text-align: center; padding: 40rpx; color: var(--text2); font-size: 24rpx; opacity: 0.6; }
