@@ -275,7 +275,7 @@ exports.main = async (event, context) => {
       if (exist.data.length > 0) {
         // 如果之前加入过，重新激活并更新加入时间以排到最前
         await db.collection('Players').doc(exist.data[0]._id).update({ 
-          data: { is_hidden: false, joined_at: db.serverDate() } 
+          data: { is_hidden: false, is_kicked: false, joined_at: db.serverDate() } 
         })
         return { success: true, existed: true }
       }
@@ -307,6 +307,32 @@ exports.main = async (event, context) => {
           is_virtual: true,
           joined_at: db.serverDate()
         }
+      })
+      return { success: true }
+    }
+
+    // ─── 踢出玩家 ──────────────────────────────────────────────────────────
+    case 'kick': {
+      const { room_id, player_id } = data
+      const room = await db.collection('Rooms').doc(room_id).get()
+      if (room.data.host_id !== OPENID) {
+        return { success: false, msg: '只有管理员有权踢人' }
+      }
+      await db.collection('Players').doc(player_id).update({
+        data: { is_kicked: true }
+      })
+      return { success: true }
+    }
+
+    // ─── 恢复玩家 ──────────────────────────────────────────────────────────
+    case 'restore': {
+      const { room_id, player_id } = data
+      const room = await db.collection('Rooms').doc(room_id).get()
+      if (room.data.host_id !== OPENID) {
+        return { success: false, msg: '只有管理员有权操作' }
+      }
+      await db.collection('Players').doc(player_id).update({
+        data: { is_kicked: false }
       })
       return { success: true }
     }

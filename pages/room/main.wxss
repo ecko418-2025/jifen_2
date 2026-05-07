@@ -32,15 +32,17 @@
 .header { padding-bottom: 20rpx; border-bottom: 1rpx solid #eee; }
 .player-scroll { width: 100%; padding: 30rpx 0; white-space: nowrap; }
 .player-list { display: flex; padding: 0 30rpx; }
-.player-item { flex-shrink: 0; width: 140rpx; display: flex; flex-direction: column; align-items: center; margin-right: 20rpx; }
+.player-item, .avatar-item { flex-shrink: 0; width: 140rpx; display: flex; flex-direction: column; align-items: center; margin-right: 20rpx; }
 .avatar-wrapper { width: 100rpx; height: 100rpx; border-radius: 50%; border: 4rpx solid #f0f0f0; overflow: hidden; margin-bottom: 10rpx; display: flex; align-items: center; justify-content: center; position: relative; }
 .avatar-wrapper.is-me { border-color: #6c63ff; background: rgba(108, 99, 255, 0.05); }
+.avatar-wrapper.is-kicked { opacity: 0.5; filter: grayscale(1); }
+.kick-tag { position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.6); color: #fff; font-size: 18rpx; text-align: center; padding: 2rpx 0; }
 
 /* 台面特殊样式 */
 .table-avatar { background: #fff9e6; border-color: #ffd700 !important; font-size: 50rpx; }
 .table-val { color: #ffd700 !important; }
 
-.avatar { width: 100%; height: 100%; }
+.avatar-img { width: 100%; height: 100%; }
 .avatar-placeholder { width: 100%; height: 100%; background: #eee; display: flex; align-items: center; justify-content: center; color: #333; font-weight: bold; }
 .nickname { font-size: 24rpx; color: #333; margin-bottom: 6rpx; font-weight: 500; }
 .score { font-size: 28rpx; font-weight: bold; }
@@ -233,9 +235,11 @@
 .input-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 3000; display: flex; align-items: flex-start; justify-content: center; padding-top: 15vh; }
 .modal-mask { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
 .modal-content { position: relative; width: 560rpx; background: #fff; border-radius: 32rpx; overflow: hidden; animation: popIn 0.2s ease-out; }
-.modal-header { padding: 40rpx 40rpx 20rpx; font-size: 32rpx; font-weight: bold; text-align: center; color: #333; }
+.modal-header { padding: 40rpx 40rpx 20rpx; font-size: 34rpx; font-weight: bold; text-align: center; color: #333; }
+.modal-prefix { color: #6c63ff; margin-right: 12rpx; }
+.modal-name { color: #333; }
 .modal-body { padding: 30rpx 40rpx 50rpx; }
-.modal-input { width: 100%; height: 90rpx; background: #f8f8f8; border-radius: 12rpx; padding: 0 30rpx; font-size: 36rpx; font-weight: bold; color: #000; text-align: center; border: 1rpx solid #eee; }
+.modal-input { width: 100%; height: 100rpx; background: #f8f8f8; border-radius: 16rpx; padding: 0 30rpx; font-size: 40rpx; font-weight: bold; color: #000; text-align: center; border: 1rpx solid #eee; }
 .modal-footer { display: flex; border-top: 1rpx solid #eee; }
 .modal-btn { flex: 1; height: 100rpx; display: flex; align-items: center; justify-content: center; font-size: 30rpx; font-weight: 500; }
 .modal-btn.cancel { color: #999; border-right: 1rpx solid #eee; }

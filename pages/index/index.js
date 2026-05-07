@@ -19,23 +19,27 @@ Page({
     activeRooms: [],
     loading: false,
     showStatsDetail: false,
+    showProfileModal: false,
     inputRoomCode: ''
   },
-
   onLoad(options) {
     // 需求①：处理分享链接中携带的 roomId，自动跳转进房间
     if (options.roomId) {
       wx.navigateTo({ url: `/pages/room/main?id=${options.roomId}` })
-      return
-    }
-    // 处理小程序码扫码进入（scene 参数是 roomId）
-    if (options.scene) {
+    } else if (options.scene) {
+      // 处理小程序码扫码进入（scene 参数是 roomId）
       const roomId = decodeURIComponent(options.scene)
       wx.navigateTo({ url: `/pages/room/main?id=${roomId}` })
-      return
     }
+
     this.refreshHomeData()
+    
+    // 如果没有昵称，显示个人信息确认弹窗
+    if (!this.data.userInfo.nickname) {
+      this.setData({ showProfileModal: true })
+    }
   },
+
 
   onShow() {
     this.setData({
@@ -147,44 +151,57 @@ Page({
     }
   },
 
-  // 使用 Canvas 进行自动中心剪裁和缩放 (200x200)
+  // 使用 Canvas 2D 接口进行自动中心剪裁和缩放 (200x200)
   processImage(src) {
     return new Promise((resolve, reject) => {
-      wx.getImageInfo({
-        src,
-        success: (info) => {
-          const ctx = wx.createCanvasContext('avatarCanvas');
-          const size = 200; // 目标尺寸
-          const { width, height } = info;
-          
-          // 计算剪裁区域（取中间正方形）
-          let sx, sy, sSize;
-          if (width > height) {
-            sSize = height;
-            sx = (width - height) / 2;
-            sy = 0;
-          } else {
-            sSize = width;
-            sx = 0;
-            sy = (height - width) / 2;
+      const query = wx.createSelectorQuery();
+      query.select('#avatarCanvas')
+        .fields({ node: true, size: true })
+        .exec((res) => {
+          if (!res[0] || !res[0].node) {
+            reject(new Error('未找到画布节点'));
+            return;
           }
+          const canvas = res[0].node;
+          const ctx = canvas.getContext('2d');
+          const dpr = wx.getSystemInfoSync().pixelRatio;
+          
+          // 设置画布物理像素尺寸
+          canvas.width = 200 * dpr;
+          canvas.height = 200 * dpr;
+          ctx.scale(dpr, dpr);
 
-          // 绘制到 200x200 的画布上
-          ctx.drawImage(src, sx, sy, sSize, sSize, 0, 0, size, size);
-          ctx.draw(false, () => {
+          const img = canvas.createImage();
+          img.src = src;
+          img.onload = () => {
+            const { width, height } = img;
+            const size = 200;
+            let sx, sy, sSize;
+            if (width > height) {
+              sSize = height;
+              sx = (width - height) / 2;
+              sy = 0;
+            } else {
+              sSize = width;
+              sx = 0;
+              sy = (height - width) / 2;
+            }
+            
+            ctx.clearRect(0, 0, size, size);
+            ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, size, size);
+            
             wx.canvasToTempFilePath({
-              canvasId: 'avatarCanvas',
+              canvas,
               destWidth: size,
               destHeight: size,
               fileType: 'jpg',
-              quality: 0.8, // 控制压缩质量
+              quality: 0.8,
               success: (res) => resolve(res.tempFilePath),
-              fail: reject
+              fail: (err) => reject(err)
             });
-          });
-        },
-        fail: reject
-      });
+          };
+          img.onerror = (err) => reject(err);
+        });
     });
   },
 
@@ -203,6 +220,15 @@ Page({
     } catch (err) {
       console.warn('昵称同步失败', err)
     }
+  },
+
+  confirmProfile() {
+    if (!this.data.userInfo.nickname) {
+      wx.showToast({ title: '请输入昵称', icon: 'none' })
+      return
+    }
+    this.setData({ showProfileModal: false })
+    wx.showToast({ title: '欢迎回来！' })
   },
 
   async goToCreate() {

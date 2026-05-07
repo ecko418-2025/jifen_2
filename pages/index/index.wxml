@@ -44,7 +44,7 @@
     <view class="room-item" wx:for="{{activeRooms}}" wx:key="room_id"
           bindlongpress="onLongPressRoom" data-id="{{item.room_id}}">
       <view class="room-info" bindtap="enterRoom" data-id="{{item.room_id}}">
-        <text class="icon">🈴</text>
+        <view class="room-icon">🏠</view>
         <view class="room-detail">
           <text class="code">房间: {{item.room_code}}</text>
           <text class="date">{{item.date_str}}</text>
@@ -95,6 +95,30 @@
     </view>
   </view>
 
-  <!-- 隐藏的画布，用于头像处理 -->
-  <canvas canvas-id="avatarCanvas" style="position:fixed; left: -9999px; width: 200px; height: 200px;"></canvas>
+  <!-- 个人信息确认弹窗 -->
+  <view class="p-modal" wx:if="{{showProfileModal}}">
+    <view class="p-mask"></view>
+    <view class="p-content">
+      <view class="p-title">狼管家记账</view>
+      <view class="p-desc">请设置头像和昵称以开启记账功能</view>
+      
+      <button class="p-avatar-wrap" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+        <image class="p-avatar-img" src="{{userInfo.avatarUrl || '/assets/default-avatar.png'}}" mode="aspectFill" />
+        <view class="p-avatar-edit">点击设置头像</view>
+      </button>
+
+      <view class="p-input-wrap">
+        <text class="p-label">昵称</text>
+        <input type="nickname" class="p-nickname-input" placeholder="请输入您的昵称" 
+               value="{{userInfo.nickname}}" bindblur="onNicknameBlur" />
+      </view>
+
+      <view class="p-footer">
+        <button class="p-btn-confirm" bindtap="confirmProfile">开始体验</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 隐藏的画布，用于头像处理 (使用现代 Canvas 2D 接口) -->
+  <canvas type="2d" id="avatarCanvas" style="position:fixed; left: -9999px; width: 200px; height: 200px;"></canvas>
 </view>

@@ -22,7 +22,8 @@ Page({
     inputModalTitle: '',
     inputModalPlaceholder: '',
     inputModalValue: '',
-    inputModalType: 'number'
+    inputModalType: 'number',
+    isHost: false
   },
 
   async onLoad(options) {
@@ -102,7 +103,8 @@ Page({
     this.setData({ 
       roomCode: data.room_code, 
       tableFee: Number(data.table_fee || 0),
-      roomQRCode: data.qr_code_url || ''
+      roomQRCode: data.qr_code_url || '',
+      isHost: data.host_id === this.myOpenid
     });
   },
 
@@ -129,6 +131,7 @@ Page({
               nickname: data.nickname || '未知用户',
               avatar: data.avatar || '',
               current_score: Number(data.current_score || 0),
+              is_kicked: !!data.is_kicked,
               is_me: (data.user_id && data.user_id === that.myOpenid) || (data.nickname === myLocalNickname)
             };
           });
@@ -147,6 +150,12 @@ Page({
           this.lastScoreFingerprint = scoreFingerprint;
 
           that.setData({ players });
+          
+          // 核心修复：当玩家列表变动（如有人被踢）时，实时更新快捷记账列表
+          if (that.data.currentTab === 'expense' || that.data.currentTab === 'income') {
+            const others = players.filter(p => !p.is_me && !p.is_kicked);
+            that.setData({ otherPlayers: others });
+          }
           
           const me = players.find(p => p.is_me);
           if (me) {
@@ -202,6 +211,7 @@ Page({
           nickname: data.nickname || '未知用户',
           avatar: data.avatar || '',
           current_score: Number(data.current_score || 0),
+          is_kicked: !!data.is_kicked,
           is_me: (data.user_id && data.user_id === this.myOpenid) || (data.nickname === myLocalNickname)
         }));
         this.setData({ players });
@@ -294,11 +304,52 @@ Page({
 
   onPlayerClick(e) {
     const player = e.currentTarget.dataset.player;
-    if (!player || player.is_me) return;
-    if (!this.data.myPlayerId) return;
+    if (!player) return;
+    
+    // 如果是自己且不是房主，不处理
+    if (player.is_me && !this.data.isHost) return;
+    
+    // 如果是房主点击（包括点击自己），弹出操作菜单
+    if (this.data.isHost) {
+      const isSelf = player.is_me;
+      const isKicked = player.is_kicked;
+      
+      let itemList = [];
+      if (isKicked) {
+        itemList = ['恢复进入房间'];
+      } else if (isSelf) {
+        itemList = ['踢出房间(退出)'];
+      } else {
+        itemList = ['记一笔账', '踢出房间'];
+      }
+
+      wx.showActionSheet({
+        itemList: itemList,
+        success: (res) => {
+          if (isKicked) {
+            if (res.tapIndex === 0) this.restorePlayer(player);
+          } else if (isSelf) {
+            if (res.tapIndex === 0) this.kickPlayer(player);
+          } else {
+            if (res.tapIndex === 0) this.showPlayerScoreInput(player);
+            else if (res.tapIndex === 1) this.kickPlayer(player);
+          }
+        },
+        fail: (err) => {
+          console.log('ActionSheet取消', err);
+        }
+      });
+    } else {
+      if (player.is_me) return;
+      this.showPlayerScoreInput(player);
+    }
+  },
+
+  showPlayerScoreInput(player) {
     this.setData({
       showInputModal: true,
-      inputModalTitle: `支出给 ${player.nickname}`,
+      inputModalPrefix: '支出给',
+      inputModalName: player.nickname,
       inputModalPlaceholder: '请输入支出金额',
       inputModalValue: '',
       inputModalType: 'number',
@@ -307,11 +358,54 @@ Page({
     });
   },
 
+  async restorePlayer(player) {
+    wx.showLoading({ title: '正在恢复', mask: true });
+    try {
+      await wx.cloud.callFunction({
+        name: 'room-manager',
+        data: { action: 'restore', data: { room_id: this.data.roomId, player_id: player._id } }
+      });
+      wx.hideLoading();
+      wx.showToast({ title: '已恢复' });
+    } catch (e) {
+      wx.hideLoading();
+      wx.showToast({ title: '操作失败', icon: 'none' });
+    }
+  },
+
+  async kickPlayer(player) {
+    wx.showModal({
+      title: '确认踢出',
+      content: `确定要将玩家 ${player.nickname} 踢出房间吗？（其余额将保留以供核对）`,
+      success: async (res) => {
+        if (res.confirm) {
+          wx.showLoading({ title: '正在踢出', mask: true });
+          try {
+            await wx.cloud.callFunction({
+              name: 'room-manager',
+              data: { action: 'kick', data: { room_id: this.data.roomId, player_id: player._id } }
+            });
+            wx.hideLoading();
+            wx.showToast({ title: '已踢出' });
+            // 如果踢出的是自己，跳转回首页
+            if (player.is_me) {
+              setTimeout(() => { wx.reLaunch({ url: '/pages/index/index' }); }, 1500);
+            }
+          } catch (e) {
+            wx.hideLoading();
+            wx.showToast({ title: '操作失败', icon: 'none' });
+          }
+        }
+      }
+    });
+  },
+
   onTableClick() {
     if (!this.data.myPlayerId) return;
     this.setData({
       showInputModal: true,
-      inputModalTitle: '缴纳台面费',
+      inputModalPrefix: '',
+      inputModalName: '缴纳台面费',
       inputModalPlaceholder: '请输入台面费金额',
       inputModalValue: '',
       inputModalType: 'number',
@@ -391,7 +485,7 @@ Page({
   switchTab(e) {
     const tab = e.currentTarget.dataset.tab;
     if (tab === 'expense' || tab === 'income') {
-      const others = this.data.players.filter(p => !p.is_me);
+      const others = this.data.players.filter(p => !p.is_me && !p.is_kicked);
       this.setData({ otherPlayers: others, batchScores: {} });
     }
     this.setData({ currentTab: tab, myPreviewDelta: 0 });

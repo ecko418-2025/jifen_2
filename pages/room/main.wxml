@@ -10,16 +10,15 @@
       <scroll-view scroll-x class="player-scroll">
         <view class="player-list">
           <!-- 玩家列表 -->
-          <view wx:for="{{players}}" wx:key="_id" class="player-item" bindtap="onPlayerClick" data-player="{{item}}">
-            <view class="avatar-wrapper {{item.is_me ? 'is-me' : ''}}">
-              <image wx:if="{{item.avatar}}" src="{{item.avatar}}" class="avatar" />
-              <view wx:else class="avatar-placeholder">{{item.nickname[0]}}</view>
-            </view>
-            <text class="nickname">{{item.nickname}}</text>
-            <text class="score {{item.current_score < 0 ? 'neg' : 'pos'}}">
-              {{item.current_score > 0 ? '+' : ''}}{{item.current_score}}
-            </text>
-          </view>
+          <view class="avatar-item" wx:for="{{players}}" wx:key="_id" bindtap="onPlayerClick" data-player="{{item}}">
+      <view class="avatar-wrapper {{item.is_me ? 'is-me' : ''}} {{item.is_kicked ? 'is-kicked' : ''}}">
+        <image wx:if="{{item.avatar}}" class="avatar-img" src="{{item.avatar}}" mode="aspectFill" />
+        <view wx:else class="avatar-placeholder">{{item.nickname[0]}}</view>
+        <view class="kick-tag" wx:if="{{item.is_kicked}}">已退出</view>
+      </view>
+      <text class="nickname">{{item.nickname}}</text>
+      <text class="score {{item.current_score > 0 ? 'pos' : (item.current_score < 0 ? 'neg' : '')}}">{{item.current_score > 0 ? '+' : ''}}{{item.current_score}}</text>
+    </view>
           <!-- 台面费快捷项 -->
           <view class="player-item table-item" bindtap="onTableClick">
             <view class="avatar-wrapper table-avatar">💰</view>
@@ -33,7 +32,7 @@
         </view>
       </scroll-view>
       <view class="room-info">
-        <view class="table-balance">台面剩余: <text class="val">{{tableFee}}</text></view>
+        <view class="table-balance">台面: <text class="val">{{tableFee}}</text></view>
         <view class="header-actions">
           <view class="qr-btn" bindtap="scrollToHistory">历史 📜</view>
           <view class="qr-btn" bindtap="showQR">二维码 📲</view>
@@ -170,7 +169,10 @@
   <view class="input-modal" wx:if="{{showInputModal}}">
     <view class="modal-mask" bindtap="onModalCancel"></view>
     <view class="modal-content">
-      <view class="modal-header">{{inputModalTitle}}</view>
+      <view class="modal-header">
+        <text class="modal-prefix" wx:if="{{inputModalPrefix}}">{{inputModalPrefix}}</text>
+        <text class="modal-name">{{inputModalName}}</text>
+      </view>
       <view class="modal-body">
         <input class="modal-input" type="{{inputModalType}}" focus="{{true}}" 
                placeholder="{{inputModalPlaceholder}}" bindinput="onModalInput" 
