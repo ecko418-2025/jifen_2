@@ -19,7 +19,6 @@ Page({
     activeRooms: [],
     loading: false,
     showStatsDetail: false,
-    showProfileModal: false,
     inputRoomCode: ''
   },
   onLoad(options) {
@@ -33,11 +32,6 @@ Page({
     }
 
     this.refreshHomeData()
-    
-    // 如果没有昵称，显示个人信息确认弹窗
-    if (!this.data.userInfo.nickname) {
-      this.setData({ showProfileModal: true })
-    }
   },
 
 
@@ -222,20 +216,12 @@ Page({
     }
   },
 
-  confirmProfile() {
-    if (!this.data.userInfo.nickname) {
-      wx.showToast({ title: '请输入昵称', icon: 'none' })
-      return
-    }
-    this.setData({ showProfileModal: false })
-    wx.showToast({ title: '欢迎回来！' })
-  },
+
 
   async goToCreate() {
-    if (!this.data.userInfo.nickname) {
-      wx.showToast({ title: '请先设置头像昵称', icon: 'none' })
-      return
-    }
+    const nickname = this.data.userInfo.nickname || '新玩家'
+    const avatar = this.data.userInfo.avatarUrl || ''
+    
     wx.showLoading({ title: '正在开启牌局', mask: true })
     try {
       const res = await wx.cloud.callFunction({
@@ -243,8 +229,8 @@ Page({
         data: {
           action: 'create',
           data: {
-            nickname: this.data.userInfo.nickname,
-            avatar: this.data.userInfo.avatarUrl,
+            nickname: nickname,
+            avatar: avatar,
             rules: { baseScore: 0 }
           }
         }
