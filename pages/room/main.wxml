@@ -73,6 +73,7 @@
           <input class="unit-input-field" type="number" placeholder="单份金额" bindinput="onUnitInput" value="{{unitAmount}}" />
           <view class="multiplier-btn" bindtap="applyMultiplier" data-m="2">两份</view>
           <view class="multiplier-btn" bindtap="applyMultiplier" data-m="3">三份</view>
+          <view class="multiplier-btn" bindtap="applyMultiplier" data-m="4">四份</view>
         </view>
         <view class="player-input-list">
           <view class="p-input-item" wx:for="{{otherPlayers}}" wx:key="_id">

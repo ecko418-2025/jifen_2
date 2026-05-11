@@ -36,13 +36,13 @@
 
 .room-item {
   background: #fff;
-  border-radius: 16rpx;
   padding: 30rpx;
-  margin-bottom: 20rpx;
+  border-radius: 12rpx;
   display: flex;
   justify-content: space-between;
   align-items: center;
   box-shadow: 0 2rpx 10rpx rgba(0,0,0,0.02);
+  margin-bottom: 16rpx;
 }
 
 .room-main {
@@ -51,7 +51,15 @@
 }
 
 .room-icon {
+  width: 80rpx;
+  height: 80rpx;
+  background: #f0f7ff;
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 40rpx;
+  color: #3498db;
   margin-right: 20rpx;
 }
 
@@ -63,12 +71,12 @@
 .room-code {
   font-size: 30rpx;
   font-weight: bold;
-  color: #333;
-  margin-bottom: 6rpx;
+  color: #27ae60;
+  margin-bottom: 4rpx;
 }
 
 .room-date {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: #999;
 }
 
@@ -77,8 +85,8 @@
   font-weight: bold;
 }
 
-.pos { color: #27ae60; }
-.neg { color: #e74c3c; }
+.pos { color: #e74c3c !important; }
+.neg { color: #27ae60 !important; }
 
 .empty-tip {
   text-align: center;

@@ -187,7 +187,10 @@ Page({
     this._refreshing = true;
     try {
       const promises = [
-        db.collection('Rounds').where({ room_id: this.data.roomId }).orderBy('created_at', 'desc').limit(50).get(),
+        wx.cloud.callFunction({
+          name: 'room-manager',
+          data: { action: 'getRounds', data: { room_id: this.data.roomId } }
+        }),
         db.collection('Rooms').doc(this.data.roomId).get()
       ];
       
@@ -196,7 +199,7 @@ Page({
       }
 
       const results = await Promise.all(promises);
-      const roundsRes = results[0];
+      const roundsRes = results[0].result ? results[0].result.rounds : [];
       const roomRes = results[1];
       
       this.processRounds(roundsRes);
@@ -225,9 +228,14 @@ Page({
     }
   },
 
-  processRounds(snapshot) {
-    if (!snapshot) return;
-    const docs = snapshot.docs || (Array.isArray(snapshot.data) ? snapshot.data : (snapshot.data ? [snapshot.data] : []));
+  processRounds(input) {
+    if (!input) return;
+    let docs = [];
+    if (Array.isArray(input)) {
+      docs = input;
+    } else {
+      docs = input.docs || (Array.isArray(input.data) ? input.data : (input.data ? [input.data] : []));
+    }
     const players = this.data.players || [];
     if (players.length === 0 || docs.length === 0) return;
 

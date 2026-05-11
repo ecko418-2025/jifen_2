@@ -7,7 +7,7 @@
   <scroll-view scroll-y class="room-list" refresher-enabled="{{true}}" refresher-triggered="{{loading}}" bindrefresherrefresh="loadHistory">
     <view class="room-item" wx:for="{{rooms}}" wx:key="room_id" bindtap="enterRoom" data-id="{{item.room_id}}" bindlongpress="onLongPressRoom">
       <view class="room-main">
-        <view class="room-icon">🈴</view>
+        <view class="room-icon">🏠</view>
         <view class="room-info">
           <text class="room-code">房间: {{item.room_code}}</text>
           <text class="room-date">{{item.date_str}}</text>

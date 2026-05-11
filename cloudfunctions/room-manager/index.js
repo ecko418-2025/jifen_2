@@ -16,7 +16,7 @@ exports.main = async (event, context) => {
         const allPRes = await db.collection('Players')
           .where({ user_id: OPENID })
           .orderBy('joined_at', 'desc')
-          .limit(100)
+          .limit(1000)
           .get()
 
         const allData = allPRes.data || []
@@ -78,7 +78,7 @@ exports.main = async (event, context) => {
         const pRes = await db.collection('Players')
           .where({ user_id: OPENID, is_hidden: _.neq(true) })
           .orderBy('joined_at', 'desc')
-          .limit(50)
+          .limit(1000)
           .get()
 
         const records = pRes.data || []
@@ -120,7 +120,7 @@ exports.main = async (event, context) => {
         // 查出该用户所有 Players 记录
         const pRes = await db.collection('Players')
           .where({ user_id: OPENID, is_virtual: _.neq(true) })
-          .limit(100)
+          .limit(1000)
           .get()
 
         const updates = pRes.data.map(p =>
@@ -179,17 +179,7 @@ exports.main = async (event, context) => {
         }
       })
       
-      // 修改：保留最近 3 个活跃房间，其余隐藏
-      const allActive = await db.collection('Players')
-        .where({ user_id: OPENID, is_hidden: _.neq(true) })
-        .orderBy('joined_at', 'desc')
-        .get()
-      
-      if (allActive.data.length >= 3) {
-        // 如果已经有 3 个或更多，把最老的那批隐藏掉（保留最新的 2 个，加上现在要加的这个刚好 3 个）
-        const idsToHide = allActive.data.slice(2).map(p => p._id)
-        await db.collection('Players').where({ _id: _.in(idsToHide) }).update({ data: { is_hidden: true } })
-      }
+      // 已移除：自动隐藏旧房间的逻辑，现在保留所有历史记录
 
       await db.collection('Players').add({
         data: {
@@ -261,16 +251,7 @@ exports.main = async (event, context) => {
         .where({ room_id: room_id, user_id: OPENID })
         .get()
       
-      // 修改：保留最近 3 个活跃房间，其余隐藏
-      const allActive = await db.collection('Players')
-        .where({ user_id: OPENID, is_hidden: _.neq(true), room_id: _.neq(room_id) })
-        .orderBy('joined_at', 'desc')
-        .get()
-      
-      if (allActive.data.length >= 3) {
-        const idsToHide = allActive.data.slice(2).map(p => p._id)
-        await db.collection('Players').where({ _id: _.in(idsToHide) }).update({ data: { is_hidden: true } })
-      }
+      // 已移除：自动隐藏旧房间的逻辑，现在保留所有历史记录
 
       if (exist.data.length > 0) {
         // 如果之前加入过，重新激活并更新加入时间以排到最前
@@ -335,6 +316,21 @@ exports.main = async (event, context) => {
         data: { is_kicked: false }
       })
       return { success: true }
+    }
+
+    // ─── 获取房间内所有流水（对局记录） ────────────────────────────────────
+    case 'getRounds': {
+      try {
+        const { room_id } = data
+        const rRes = await db.collection('Rounds')
+          .where({ room_id: room_id })
+          .orderBy('created_at', 'desc')
+          .limit(1000)
+          .get()
+        return { success: true, rounds: rRes.data || [] }
+      } catch (e) {
+        return { success: false, error: e.message }
+      }
     }
 
     // ─── 获取 openid ───────────────────────────────────────────────────────

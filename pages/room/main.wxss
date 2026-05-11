@@ -164,7 +164,7 @@
 }
 .tool-label { font-size: 24rpx; color: #e6a23c; margin-right: 15rpx; font-weight: bold; }
 .unit-input-field {
-  flex: 1;
+  width: 120rpx;
   height: 64rpx;
   background: #fff;
   border: 1rpx solid #ddd;
@@ -177,13 +177,13 @@
   background: #e6a23c;
   color: #fff;
   font-size: 24rpx;
-  padding: 0 25rpx;
+  padding: 0 20rpx;
   height: 64rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 8rpx;
-  margin-left: 15rpx;
+  margin-left: 30rpx;
   font-weight: bold;
 }
 
