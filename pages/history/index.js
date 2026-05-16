@@ -61,5 +61,12 @@ Page({
 
   goBack() {
     wx.navigateBack()
+  },
+
+  onShareAppMessage() {
+    return {
+      title: '狼管家记账工具 - 历史对局记录',
+      path: '/pages/index/index'
+    }
   }
 })

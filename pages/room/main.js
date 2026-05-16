@@ -652,6 +652,13 @@ Page({
     };
   },
 
+  onShareTimeline() {
+    return {
+      title: `快加入我的牌局！房间号：${this.data.roomCode}`,
+      query: `roomId=${this.data.roomId}`
+    };
+  },
+
   onEndGame() { this.setData({ showSettle: true }); },
   hideSettle() { this.setData({ showSettle: false }); },
   confirmEndGame() {

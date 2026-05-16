@@ -54,5 +54,12 @@ Page({
     } catch (e) {
       console.error('获取排行榜失败', e);
     }
+  },
+
+  onShareAppMessage() {
+    return {
+      title: '狼管家记账工具 - 谁才是真的狼王？',
+      path: '/pages/index/index'
+    };
   }
 })

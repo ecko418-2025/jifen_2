@@ -321,5 +321,18 @@ Page({
 
   goToRank() {
     wx.showToast({ title: '排行榜开发中', icon: 'none' })
+  },
+
+  onShareAppMessage() {
+    return {
+      title: '狼管家记账工具 - 轻松记录牌局分数',
+      path: '/pages/index/index'
+    }
+  },
+
+  onShareTimeline() {
+    return {
+      title: '狼管家记账工具 - 轻松记录牌局分数'
+    }
   }
 })
