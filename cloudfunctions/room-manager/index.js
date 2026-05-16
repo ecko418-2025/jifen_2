@@ -154,7 +154,7 @@ exports.main = async (event, context) => {
         scene: data.room_id,
         page: 'pages/index/index',
         checkPath: false,
-        envVersion: 'develop'
+        envVersion: 'release'
       })
       const uploadRes = await cloud.uploadFile({
         cloudPath: `room_qr/${data.room_id}_${Date.now()}.png`,
