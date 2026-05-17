@@ -530,6 +530,61 @@ exports.main = async (event, context) => {
       return { success: true }
     }
 
+    // ─── 获取房间状态（房间信息/玩家/流水）────────────────────────────────
+    case 'getRoomState': {
+      try {
+        const payload = data || {}
+        const { room_id } = payload
+        if (!room_id) {
+          return { success: false, error: '缺少房间信息' }
+        }
+
+        const roomRes = await db.collection('Rooms').doc(room_id).get()
+        const room = roomRes.data
+        const result = {
+          success: true,
+          room: {
+            room_id: room._id,
+            room_code: room.room_code,
+            table_fee: Number(room.table_fee || 0),
+            qr_code_url: room.qr_code_env_version === 'release' ? (room.qr_code_url || '') : '',
+            qr_code_env_version: room.qr_code_env_version || '',
+            host_id: room.host_id,
+            status: room.status || 'active'
+          }
+        }
+
+        if (payload.include_players === true) {
+          const playersRes = await db.collection('Players')
+            .where({ room_id })
+            .limit(1000)
+            .get()
+          result.players = (playersRes.data || []).map(p => ({
+            _id: p._id,
+            user_id: p.user_id || null,
+            nickname: p.nickname || '未知用户',
+            avatar: p.avatar || '',
+            current_score: Number(p.current_score || 0),
+            is_kicked: !!p.is_kicked,
+            is_virtual: !!p.is_virtual
+          }))
+        }
+
+        if (payload.include_rounds === true) {
+          const roundsRes = await db.collection('Rounds')
+            .where({ room_id })
+            .orderBy('created_at', 'desc')
+            .limit(1000)
+            .get()
+          result.rounds = roundsRes.data || []
+        }
+
+        return result
+      } catch (e) {
+        return { success: false, error: e.message }
+      }
+    }
+
     // ─── 获取房间内所有流水（对局记录） ────────────────────────────────────
     case 'getRounds': {
       try {

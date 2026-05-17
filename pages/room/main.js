@@ -1,6 +1,14 @@
 const db = wx.cloud.database()
 const _ = db.command
 
+function callRoomManager(action, data = {}, timeout = 30000) {
+  return wx.cloud.callFunction({
+    name: 'room-manager',
+    data: { action, data },
+    timeout
+  });
+}
+
 Page({
   data: {
     roomId: '',
@@ -43,11 +51,7 @@ Page({
     const doInit = async () => {
       try {
         // 1. 先确保登录状态
-        const loginRes = await wx.cloud.callFunction({ 
-          name: 'room-manager', 
-          data: { action: 'getOpenid' },
-          timeout: 60000
-        });
+        const loginRes = await callRoomManager('getOpenid', {}, 60000);
         this.myOpenid = loginRes.result.openid;
         
         // 2. 获取房间基础信息
@@ -95,12 +99,18 @@ Page({
       wx.hideLoading();
       this.setData({ historyScrollTop: 99999 }); // 滚动到最底部
       wx.showToast({ title: '已更新', icon: 'none' });
+    }).catch(() => {
+      wx.hideLoading();
+      wx.showToast({ title: '刷新超时，请重试', icon: 'none' });
     });
   },
 
   async fetchRoomInfo(roomId) {
-    const res = await db.collection('Rooms').doc(roomId).get();
-    const data = res.data;
+    const res = await callRoomManager('getRoomState', { room_id: roomId }, 60000);
+    if (!res.result || res.result.success !== true || !res.result.room) {
+      throw new Error((res.result && res.result.error) || '房间信息加载失败');
+    }
+    const data = res.result.room;
     this.setData({ 
       roomCode: data.room_code, 
       tableFee: Number(data.table_fee || 0),
@@ -188,29 +198,24 @@ Page({
     if (this._refreshing) return;
     this._refreshing = true;
     try {
-      const promises = [
-        wx.cloud.callFunction({
-          name: 'room-manager',
-          data: { action: 'getRounds', data: { room_id: this.data.roomId } }
-        }),
-        db.collection('Rooms').doc(this.data.roomId).get()
-      ];
-      
-      if (includePlayers) {
-        promises.push(db.collection('Players').where({ room_id: this.data.roomId }).get());
+      const stateRes = await callRoomManager('getRoomState', {
+        room_id: this.data.roomId,
+        include_players: includePlayers,
+        include_rounds: true
+      }, 60000);
+      if (!stateRes.result || stateRes.result.success !== true) {
+        throw new Error((stateRes.result && stateRes.result.error) || '房间状态刷新失败');
       }
-
-      const results = await Promise.all(promises);
-      const roundsRes = results[0].result ? results[0].result.rounds : [];
-      const roomRes = results[1];
       
-      this.processRounds(roundsRes);
-      this.setData({ tableFee: Number(roomRes.data.table_fee || 0) });
+      this.processRounds(stateRes.result.rounds || []);
+      this.setData({
+        tableFee: Number(stateRes.result.room.table_fee || 0),
+        roomStatus: stateRes.result.room.status || 'active'
+      });
 
-      if (includePlayers && results[2]) {
-        const playerRes = results[2];
+      if (includePlayers && stateRes.result.players) {
         const myLocalNickname = wx.getStorageSync('nickname');
-        const players = playerRes.data.map(data => ({
+        const players = stateRes.result.players.map(data => ({
           _id: data._id,
           user_id: data.user_id,
           nickname: data.nickname || '未知用户',
@@ -302,12 +307,12 @@ Page({
     this.setData({ showQRModal: true });
     if (this.data.roomQRCode) return;
     try {
-      const res = await wx.cloud.callFunction({
-        name: 'room-manager',
-        data: { action: 'getRoomQR', data: { room_id: this.data.roomId } }
-      });
+      const res = await callRoomManager('getRoomQR', { room_id: this.data.roomId }, 60000);
       if (res.result.qrCodeUrl) this.setData({ roomQRCode: res.result.qrCodeUrl });
-    } catch (e) { console.error('二维码生成失败', e); }
+    } catch (e) {
+      console.error('二维码生成失败', e);
+      wx.showToast({ title: '二维码生成超时，请重试', icon: 'none' });
+    }
   },
 
   hideQR() { this.setData({ showQRModal: false }); },
@@ -373,7 +378,8 @@ Page({
     try {
       await wx.cloud.callFunction({
         name: 'room-manager',
-        data: { action: 'restore', data: { room_id: this.data.roomId, player_id: player._id } }
+        data: { action: 'restore', data: { room_id: this.data.roomId, player_id: player._id } },
+        timeout: 30000
       });
       wx.hideLoading();
       wx.showToast({ title: '已恢复' });
@@ -393,7 +399,8 @@ Page({
           try {
             await wx.cloud.callFunction({
               name: 'room-manager',
-              data: { action: 'kick', data: { room_id: this.data.roomId, player_id: player._id } }
+              data: { action: 'kick', data: { room_id: this.data.roomId, player_id: player._id } },
+              timeout: 30000
             });
             wx.hideLoading();
             wx.showToast({ title: '已踢出' });
@@ -457,7 +464,8 @@ Page({
       
       await wx.cloud.callFunction({
         name: 'room-manager',
-        data: { action: 'submitRound', data: { room_id: this.data.roomId, scores: updateData, table_fee: tableDelta } }
+        data: { action: 'submitRound', data: { room_id: this.data.roomId, scores: updateData, table_fee: tableDelta } },
+        timeout: 30000
       });
       
       wx.hideLoading();
@@ -601,7 +609,8 @@ Page({
         data: {
           action: 'submitRound',
           data: { room_id: this.data.roomId, scores: updateData, table_fee: tableDelta }
-        }
+        },
+        timeout: 30000
       });
       wx.hideLoading();
       wx.showToast({ title: '记账成功' });
@@ -634,7 +643,8 @@ Page({
           try {
             await wx.cloud.callFunction({
               name: 'room-manager',
-              data: { action: 'addVirtual', data: { room_id: this.data.roomId, nickname: res.content } }
+              data: { action: 'addVirtual', data: { room_id: this.data.roomId, nickname: res.content } },
+              timeout: 30000
             });
             wx.hideLoading();
             wx.showToast({ title: '添加成功' });
