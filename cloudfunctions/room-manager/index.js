@@ -3,6 +3,87 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
+async function generateUniqueRoomCode(maxRetries = 10) {
+  for (let i = 0; i < maxRetries; i++) {
+    const roomCode = Math.floor(100000 + Math.random() * 900000).toString()
+    const existRes = await db.collection('Rooms')
+      .where({ room_code: roomCode })
+      .limit(1)
+      .get()
+    if ((existRes.data || []).length === 0) return roomCode
+  }
+  throw new Error('房间号生成失败，请重试')
+}
+
+function calculateTransfers(players) {
+  const debtors = []
+  const creditors = []
+
+  players.forEach(p => {
+    const score = Number(p.current_score || 0)
+    if (score < 0) {
+      debtors.push({ player_id: p.player_id || null, name: p.nickname, amount: Math.abs(score) })
+    } else if (score > 0) {
+      creditors.push({ player_id: p.player_id || null, name: p.nickname, amount: score })
+    }
+  })
+
+  const transfers = []
+  let i = 0
+  let j = 0
+  while (i < debtors.length && j < creditors.length) {
+    const amount = Math.min(debtors[i].amount, creditors[j].amount)
+    transfers.push({
+      from_player_id: debtors[i].player_id,
+      from: debtors[i].name,
+      to_player_id: creditors[j].player_id,
+      to: creditors[j].name,
+      amount
+    })
+
+    debtors[i].amount -= amount
+    creditors[j].amount -= amount
+    if (debtors[i].amount === 0) i++
+    if (creditors[j].amount === 0) j++
+  }
+
+  return transfers
+}
+
+function buildFinalSnapshot(players, tableFee) {
+  const playerSnapshots = players.map(p => ({
+    player_id: p._id,
+    user_id: p.user_id || null,
+    nickname: p.nickname || '未知用户',
+    avatar: p.avatar || '',
+    current_score: Number(p.current_score || 0),
+    is_host: !!p.is_host,
+    is_virtual: !!p.is_virtual,
+    is_kicked: !!p.is_kicked
+  }))
+  const playersForSettle = playerSnapshots.map(p => ({
+    player_id: p.player_id,
+    nickname: p.nickname,
+    current_score: p.current_score
+  }))
+
+  if (tableFee > 0) {
+    playersForSettle.push({
+      player_id: null,
+      nickname: '台面 (结余)',
+      current_score: tableFee
+    })
+  }
+
+  return {
+    version: 1,
+    table_fee: tableFee,
+    total_player_score: playerSnapshots.reduce((sum, p) => sum + p.current_score, 0),
+    players: playerSnapshots,
+    transfers: calculateTransfers(playersForSettle)
+  }
+}
+
 exports.main = async (event, context) => {
   const { action, data } = event
   const { OPENID } = cloud.getWXContext()
@@ -48,10 +129,12 @@ exports.main = async (event, context) => {
           const roomIds = [...new Set(visibleRecords.map(p => p.room_id))]
           const rRes = await db.collection('Rooms').where({ _id: _.in(roomIds) }).get()
           rRes.data.forEach(room => {
+            if (room.status === 'closed') return
             const date = new Date(new Date(room.created_at || Date.now()).getTime() + 8 * 3600 * 1000)
             activeRooms.push({
               room_id: room._id,
               room_code: room.room_code,
+              status: room.status || 'active',
               date_str: `${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`,
               created_at: room.created_at
             })
@@ -96,6 +179,7 @@ exports.main = async (event, context) => {
           return {
             room_id: room._id,
             room_code: room.room_code,
+            status: room.status || 'active',
             my_score: scoreMap[room._id] || 0,
             date_str: `${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`,
             created_at: room.created_at
@@ -149,25 +233,33 @@ exports.main = async (event, context) => {
     // ─── 生成/获取二维码 ──────────────────────────────────────────────────
     case 'getRoomQR': {
       const roomInfo = await db.collection('Rooms').doc(data.room_id).get()
-      if (roomInfo.data.qr_code_url) return { qrCodeUrl: roomInfo.data.qr_code_url }
+      const qrEnvVersion = 'release'
+      if (roomInfo.data.qr_code_url && roomInfo.data.qr_code_env_version === qrEnvVersion) {
+        return { qrCodeUrl: roomInfo.data.qr_code_url }
+      }
       const qrRes = await cloud.openapi.wxacode.getUnlimited({
         scene: data.room_id,
         page: 'pages/index/index',
         checkPath: false,
-        envVersion: 'release'
+        envVersion: qrEnvVersion
       })
       const uploadRes = await cloud.uploadFile({
-        cloudPath: `room_qr/${data.room_id}_${Date.now()}.png`,
+        cloudPath: `room_qr/${qrEnvVersion}_${data.room_id}_${Date.now()}.png`,
         fileContent: qrRes.buffer
       })
       await db.collection('Rooms').doc(data.room_id)
-        .update({ data: { qr_code_url: uploadRes.fileID } })
+        .update({
+          data: {
+            qr_code_url: uploadRes.fileID,
+            qr_code_env_version: qrEnvVersion
+          }
+        })
       return { qrCodeUrl: uploadRes.fileID }
     }
 
     // ─── 创建房间 ──────────────────────────────────────────────────────────
     case 'create': {
-      const roomCode = Math.random().toString().slice(2, 8)
+      const roomCode = await generateUniqueRoomCode()
       const roomRes = await db.collection('Rooms').add({
         data: {
           host_id: OPENID,
@@ -199,8 +291,10 @@ exports.main = async (event, context) => {
 
     // ─── 提交一局（含零和校验）────────────────────────────────────────────
     case 'submitRound': {
-      const tFeeDelta = Number(data.table_fee || 0)
-      const rawScores = data.scores || {}
+      const payload = data || {}
+      const roomId = payload.room_id
+      const tFeeDelta = Number(payload.table_fee || 0)
+      const rawScores = payload.scores || {}
 
       // 服务端零和校验：所有玩家分数之和 + 台面费变化 必须 = 0
       let scoreSum = 0
@@ -218,9 +312,58 @@ exports.main = async (event, context) => {
         }
       }
 
+      if (!roomId) {
+        return { success: false, error: '缺少房间信息' }
+      }
+
+      const scorePlayerIds = Object.keys(updateData)
+      if (scorePlayerIds.length === 0) {
+        return { success: false, error: '缺少玩家分数变动' }
+      }
+
+      let room
+      try {
+        const roomRes = await db.collection('Rooms').doc(roomId).get()
+        room = roomRes.data
+      } catch (e) {
+        return { success: false, error: '房间不存在或已失效' }
+      }
+      if (room.status === 'closed') {
+        return { success: false, error: '房间已结算，不能继续记账' }
+      }
+
+      const playersRes = await db.collection('Players')
+        .where({ room_id: roomId })
+        .limit(1000)
+        .get()
+      const roomPlayers = playersRes.data || []
+      const playerMap = {}
+      roomPlayers.forEach(p => { playerMap[p._id] = p })
+
+      const operatorPlayer = roomPlayers.find(p => p.user_id === OPENID && p.is_virtual !== true)
+      if (!operatorPlayer || operatorPlayer.is_kicked === true) {
+        return { success: false, error: '你不是该房间的有效玩家，无法记账' }
+      }
+
+      const invalidPlayerIds = scorePlayerIds.filter(pid => !playerMap[pid])
+      if (invalidPlayerIds.length > 0) {
+        return { success: false, error: '提交中包含不属于该房间的玩家' }
+      }
+
+      const kickedPlayers = scorePlayerIds
+        .map(pid => playerMap[pid])
+        .filter(p => p.is_kicked === true)
+      if (kickedPlayers.length > 0) {
+        return { success: false, error: '已退出房间的玩家不能参与新的记账' }
+      }
+
+      if (room.host_id !== OPENID && updateData[operatorPlayer._id] === undefined) {
+        return { success: false, error: '非房主只能提交包含自己分数变动的账目' }
+      }
+
       // 更新台面费
       if (tFeeDelta !== 0) {
-        await db.collection('Rooms').doc(data.room_id)
+        await db.collection('Rooms').doc(roomId)
           .update({ data: { table_fee: _.inc(tFeeDelta) } })
       }
 
@@ -232,7 +375,7 @@ exports.main = async (event, context) => {
       promises.push(
         db.collection('Rounds').add({
           data: {
-            room_id: data.room_id,
+            room_id: roomId,
             scores: updateData,
             table_fee_delta: tFeeDelta,
             created_at: db.serverDate(),
@@ -244,21 +387,80 @@ exports.main = async (event, context) => {
       return { success: true }
     }
 
+    // ─── 关闭房间并保存最终结算快照 ───────────────────────────────────────
+    case 'closeRoom': {
+      const payload = data || {}
+      const roomId = payload.room_id
+      if (!roomId) {
+        return { success: false, error: '缺少房间信息' }
+      }
+
+      let room
+      try {
+        const roomRes = await db.collection('Rooms').doc(roomId).get()
+        room = roomRes.data
+      } catch (e) {
+        return { success: false, error: '房间不存在或已失效' }
+      }
+
+      if (room.host_id !== OPENID) {
+        return { success: false, error: '只有房主可以结束房间' }
+      }
+
+      if (room.status === 'closed') {
+        return {
+          success: true,
+          alreadyClosed: true,
+          finalSnapshot: room.final_snapshot || null
+        }
+      }
+
+      const playersRes = await db.collection('Players')
+        .where({ room_id: roomId })
+        .limit(1000)
+        .get()
+      const players = playersRes.data || []
+      const finalSnapshot = buildFinalSnapshot(players, Number(room.table_fee || 0))
+
+      await db.collection('Rooms').doc(roomId).update({
+        data: {
+          status: 'closed',
+          closed_at: db.serverDate(),
+          closed_by: OPENID,
+          final_snapshot: finalSnapshot
+        }
+      })
+
+      return {
+        success: true,
+        finalSnapshot
+      }
+    }
+
     // ─── 加入房间 ──────────────────────────────────────────────────────────
     case 'join': {
       const { room_id } = data
       const exist = await db.collection('Players')
         .where({ room_id: room_id, user_id: OPENID })
         .get()
+      const roomRes = await db.collection('Rooms').doc(room_id).get()
+      const room = roomRes.data
       
       // 已移除：自动隐藏旧房间的逻辑，现在保留所有历史记录
 
       if (exist.data.length > 0) {
+        if (room.status === 'closed') {
+          return { success: true, existed: true, closed: true }
+        }
         // 如果之前加入过，重新激活并更新加入时间以排到最前
         await db.collection('Players').doc(exist.data[0]._id).update({ 
           data: { is_hidden: false, is_kicked: false, joined_at: db.serverDate() } 
         })
         return { success: true, existed: true }
+      }
+
+      if (room.status === 'closed') {
+        return { success: false, error: '房间已结算，不能加入' }
       }
 
       await db.collection('Players').add({
@@ -278,6 +480,10 @@ exports.main = async (event, context) => {
 
     // ─── 添加虚拟玩家 ──────────────────────────────────────────────────────
     case 'addVirtual': {
+      const room = await db.collection('Rooms').doc(data.room_id).get()
+      if (room.data.status === 'closed') {
+        return { success: false, error: '房间已结算，不能添加玩家' }
+      }
       await db.collection('Players').add({
         data: {
           room_id: data.room_id,
@@ -299,6 +505,9 @@ exports.main = async (event, context) => {
       if (room.data.host_id !== OPENID) {
         return { success: false, msg: '只有管理员有权踢人' }
       }
+      if (room.data.status === 'closed') {
+        return { success: false, msg: '房间已结算，不能踢出玩家' }
+      }
       await db.collection('Players').doc(player_id).update({
         data: { is_kicked: true }
       })
@@ -311,6 +520,9 @@ exports.main = async (event, context) => {
       const room = await db.collection('Rooms').doc(room_id).get()
       if (room.data.host_id !== OPENID) {
         return { success: false, msg: '只有管理员有权操作' }
+      }
+      if (room.data.status === 'closed') {
+        return { success: false, msg: '房间已结算，不能恢复玩家' }
       }
       await db.collection('Players').doc(player_id).update({
         data: { is_kicked: false }

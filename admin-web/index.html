@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>狼人杀积分管理后台</title>
+    <!-- 引入腾讯云开发完整版 Web SDK -->
+    <script src="https://imgcache.qq.com/qcloud/cloudbase-js-sdk/1.5.0/cloudbase.full.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">🐺</div>
+                <h1>Admin Center</h1>
+            </div>
+            <nav>
+                <button class="nav-item active" data-tab="dashboard">
+                    <span class="icon">📊</span> 仪表盘
+                </button>
+                <button class="nav-item" data-tab="rooms">
+                    <span class="icon">🏠</span> 房间管理
+                </button>
+                <button class="nav-item" data-tab="players">
+                    <span class="icon">👥</span> 玩家列表
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <p>Environment: <span id="env-id">加载中...</span></p>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <header>
+                <h2 id="tab-title">仪表盘概览</h2>
+                <div class="user-info">
+                    <span class="status-dot"></span>
+                    系统状态：在线
+                </div>
+            </header>
+
+            <section id="content-area">
+                <!-- 动态内容将通过 JS 注入 -->
+                <div class="loading-spinner">数据加载中...</div>
+            </section>
+        </main>
+    </div>
+
+    <!-- 弹窗：修改分数 -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal">
+            <h3>修正分数</h3>
+            <div class="modal-body">
+                <p id="edit-player-name">正在为 [玩家] 修正分数</p>
+                <div class="input-group">
+                    <label for="current-score-input">当前分数</label>
+                    <input type="number" id="current-score-input" disabled>
+                </div>
+                <div class="input-group">
+                    <label for="new-score-input">调整后分数</label>
+                    <input type="number" id="new-score-input" placeholder="输入新分数">
+                </div>
+                <p class="warning-text">⚠️ 手动修正将绕过零和校验，请谨慎操作！</p>
+            </div>
+            <div class="modal-actions">
+                <button id="cancel-btn" class="btn-secondary">取消</button>
+                <button id="save-btn" class="btn-primary">确认保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

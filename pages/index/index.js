@@ -22,6 +22,11 @@ Page({
     inputRoomCode: ''
   },
   onLoad(options) {
+    wx.showShareMenu({
+      withShareTicket: true,
+      menus: ['shareAppMessage', 'shareTimeline']
+    })
+
     // 需求①：处理分享链接中携带的 roomId，自动跳转进房间
     if (options.roomId) {
       wx.navigateTo({ url: `/pages/room/main?id=${options.roomId}` })
@@ -325,14 +330,15 @@ Page({
 
   onShareAppMessage() {
     return {
-      title: '狼管家记账工具 - 轻松记录牌局分数',
+      title: '牌局积分助手，线下打牌记账更清楚',
       path: '/pages/index/index'
     }
   },
 
   onShareTimeline() {
     return {
-      title: '狼管家记账工具 - 轻松记录牌局分数'
+      title: '牌局积分助手，线下打牌记账更清楚',
+      query: ''
     }
   }
 })

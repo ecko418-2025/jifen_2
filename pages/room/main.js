@@ -23,7 +23,8 @@ Page({
     inputModalPlaceholder: '',
     inputModalValue: '',
     inputModalType: 'number',
-    isHost: false
+    isHost: false,
+    roomStatus: 'active'
   },
 
   async onLoad(options) {
@@ -104,7 +105,8 @@ Page({
       roomCode: data.room_code, 
       tableFee: Number(data.table_fee || 0),
       roomQRCode: data.qr_code_url || '',
-      isHost: data.host_id === this.myOpenid
+      isHost: data.host_id === this.myOpenid,
+      roomStatus: data.status || 'active'
     });
   },
 
@@ -664,10 +666,40 @@ Page({
   confirmEndGame() {
     wx.showModal({
       title: '确认退出',
-      content: '确认结算结果并退出房间吗？',
-      success: (res) => {
+      content: this.data.isHost ? '确认结算结果并结束房间吗？' : '确认结算结果并退出房间吗？',
+      success: async (res) => {
         if (res.confirm) {
-          wx.reLaunch({ url: '/pages/index/index' });
+          if (!this.data.isHost) {
+            wx.reLaunch({ url: '/pages/index/index' });
+            return;
+          }
+
+          wx.showLoading({ title: '正在结算', mask: true });
+          try {
+            const closeRes = await wx.cloud.callFunction({
+              name: 'room-manager',
+              data: {
+                action: 'closeRoom',
+                data: { room_id: this.data.roomId }
+              },
+              timeout: 20000
+            });
+            if (!closeRes.result || closeRes.result.success !== true) {
+              throw new Error((closeRes.result && (closeRes.result.error || closeRes.result.msg)) || '结算失败');
+            }
+            wx.hideLoading();
+            wx.showToast({ title: '已结束房间' });
+            setTimeout(() => {
+              wx.reLaunch({ url: '/pages/index/index' });
+            }, 800);
+          } catch (e) {
+            wx.hideLoading();
+            wx.showModal({
+              title: '结束失败',
+              content: e.message || '网络异常，请重试',
+              showCancel: false
+            });
+          }
         }
       }
     });

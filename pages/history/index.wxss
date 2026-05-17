@@ -68,11 +68,34 @@
   flex-direction: column;
 }
 
+.room-title-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4rpx;
+}
+
 .room-code {
   font-size: 30rpx;
   font-weight: bold;
   color: #27ae60;
-  margin-bottom: 4rpx;
+}
+
+.status-tag {
+  font-size: 20rpx;
+  line-height: 1;
+  padding: 6rpx 10rpx;
+  border-radius: 6rpx;
+  margin-left: 12rpx;
+}
+
+.status-tag.active {
+  color: #1e824c;
+  background: #eaf7ef;
+}
+
+.status-tag.closed {
+  color: #666;
+  background: #f0f0f0;
 }
 
 .room-date {

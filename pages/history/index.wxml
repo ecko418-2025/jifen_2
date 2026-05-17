@@ -9,7 +9,11 @@
       <view class="room-main">
         <view class="room-icon">🏠</view>
         <view class="room-info">
-          <text class="room-code">房间: {{item.room_code}}</text>
+          <view class="room-title-row">
+            <text class="room-code">房间: {{item.room_code}}</text>
+            <text class="status-tag closed" wx:if="{{item.status === 'closed'}}">已结算</text>
+            <text class="status-tag active" wx:else>进行中</text>
+          </view>
           <text class="room-date">{{item.date_str}}</text>
         </view>
       </view>
