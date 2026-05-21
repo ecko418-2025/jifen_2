@@ -8,9 +8,18 @@ const auth = app.auth();
 const db = app.database();
 const _ = db.command;
 
-// 状态管理
+// UI 状态
 let currentTab = 'dashboard';
 let editingPlayerId = null;
+
+// 分页状态
+let currentPageRooms = 1;
+const PAGE_SIZE_ROOMS = 20;
+let totalRooms = 0;
+
+let currentPagePlayers = 1;
+const PAGE_SIZE_PLAYERS = 50;
+let totalPlayers = 0;
 let qrPollTimer = null; // 二维码轮询定时器
 let activeTicketId = null; // 当前正在轮询 the Ticket
 
@@ -54,7 +63,7 @@ const api = {
     },
 
     // 核心的数据获取函数：获取记录列表
-    async getList(collectionName, limitSize) {
+    async getList(collectionName, limitSize, skipSize = 0) {
         if (this.isSessionMode()) {
             const res = await app.callFunction({
                 name: 'room-manager',
@@ -63,7 +72,8 @@ const api = {
                     sessionToken: this.getSessionToken(),
                     subAction: 'list',
                     collection: collectionName,
-                    limit: limitSize
+                    limit: limitSize,
+                    skip: skipSize
                 }
             });
             if (res.result && res.result.success) return { data: res.result.data };
@@ -74,7 +84,7 @@ const api = {
             if (collectionName === 'Rooms') query = query.orderBy('created_at', 'desc');
             if (collectionName === 'Players') query = query.orderBy('joined_at', 'desc');
             
-            const res = await query.limit(limitSize).get();
+            const res = await query.skip(skipSize).limit(limitSize).get();
             let data = res.data;
 
             // 如果是玩家列表，手动查一下对应的房间号
@@ -515,9 +525,17 @@ async function renderDashboard() {
 }
 
 // 渲染房间列表
-async function renderRooms() {
+window.renderRooms = renderRooms;
+async function renderRooms(page = 1) {
     try {
-        const res = await api.getList('Rooms', 50);
+        currentPageRooms = page;
+        if (page === 1) {
+            const countRes = await api.getCount('Rooms');
+            totalRooms = countRes.total || 0;
+        }
+        
+        const skip = (page - 1) * PAGE_SIZE_ROOMS;
+        const res = await api.getList('Rooms', PAGE_SIZE_ROOMS, skip);
         const rooms = res.data || [];
         
         if (rooms.length === 0) {
@@ -606,6 +624,16 @@ async function renderRooms() {
         });
         
         html += '</tbody></table></div>';
+        
+        const totalPages = Math.ceil(totalRooms / PAGE_SIZE_ROOMS) || 1;
+        html += `
+            <div class="pagination" style="margin-top: 15px; display: flex; justify-content: center; align-items: center; gap: 10px;">
+                <button class="btn-sm" ${page === 1 ? 'disabled' : ''} onclick="renderRooms(${page - 1})">上一页</button>
+                <span style="color: var(--text-dim); font-size: 14px;">第 ${page} / ${totalPages} 页</span>
+                <button class="btn-sm" ${page >= totalPages ? 'disabled' : ''} onclick="renderRooms(${page + 1})">下一页</button>
+            </div>
+        `;
+        
         contentArea.innerHTML = html;
         
         // 绑定到全局
@@ -659,9 +687,17 @@ async function handleBatchAutoSettle() {
 }
 
 // 渲染玩家列表
-async function renderPlayers() {
+window.renderPlayers = renderPlayers;
+async function renderPlayers(page = 1) {
     try {
-        const res = await api.getList('Players', 50);
+        currentPagePlayers = page;
+        if (page === 1) {
+            const countRes = await api.getCount('Players');
+            totalPlayers = countRes.total || 0;
+        }
+        
+        const skip = (page - 1) * PAGE_SIZE_PLAYERS;
+        const res = await api.getList('Players', PAGE_SIZE_PLAYERS, skip);
         const players = res.data || [];
 
         if (players.length === 0) {
@@ -685,25 +721,80 @@ async function renderPlayers() {
                     <tbody>
         `;
         
-        players.forEach(player => {
+        const groupedPlayers = {};
+        players.forEach(p => {
+            const key = p.nickname || '未知玩家';
+            if (!groupedPlayers[key]) {
+                groupedPlayers[key] = {
+                    nickname: p.nickname || '未知玩家',
+                    avatar: p.avatar,
+                    totalScore: 0,
+                    instances: []
+                };
+            }
+            groupedPlayers[key].totalScore += p.current_score || 0;
+            groupedPlayers[key].instances.push(p);
+        });
+
+        Object.values(groupedPlayers).forEach((group, index) => {
+            const hasMultiple = group.instances.length > 1;
+            const groupId = 'player-group-' + index;
+            
             html += `
-                <tr>
-                    <td><img src="${player.avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;" onerror="this.src='https://mmbiz.qpic.cn/mmbiz_png/icTdbqWNOwNRna42FI242Lcia07xvkWModszK68mKzVnI6zXk7Sdl7n1icA2Ebicic4icib4X0kicqG4nBVzNszM1EicicHA/640?wx_fmt=png'"></td>
-                    <td>${player.nickname || '未知玩家'}</td>
-                    <td><code>${player.room_code || '未知'}</code></td>
-                    <td style="font-weight:700; color:${player.current_score >= 0 ? 'var(--success)' : 'var(--danger)'}">
-                        ${player.current_score}
+                <tr style="${hasMultiple ? 'cursor:pointer; background:var(--bg-card-hover);' : ''}" onclick="${hasMultiple ? `toggleGroup('${groupId}')` : ''}">
+                    <td><img src="${group.avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;" onerror="this.src='https://mmbiz.qpic.cn/mmbiz_png/icTdbqWNOwNRna42FI242Lcia07xvkWModszK68mKzVnI6zXk7Sdl7n1icA2Ebicic4icib4X0kicqG4nBVzNszM1EicicHA/640?wx_fmt=png'"></td>
+                    <td style="font-weight:bold;">
+                        ${group.nickname}
+                        ${hasMultiple ? `<span style="font-size:12px;color:var(--text-dim);margin-left:5px;">(${group.instances.length} 个记录) ▼</span>` : ''}
                     </td>
-                    <td>${player.is_host ? '👑 房主' : '👤 玩家'}</td>
+                    <td>${hasMultiple ? '<span style="color:var(--text-dim);">多房间</span>' : `<code>${group.instances[0].room_code || '未知'}</code>`}</td>
+                    <td style="font-weight:700; color:${group.totalScore >= 0 ? 'var(--success)' : 'var(--danger)'}">
+                        ${group.totalScore}
+                    </td>
+                    <td>${hasMultiple ? '-' : (group.instances[0].is_host ? '👑 房主' : '👤 玩家')}</td>
                     <td>
-                        <button class="btn-sm" onclick="openEditModal('${player._id}', '${player.nickname}', ${player.current_score})">修正</button>
+                        ${hasMultiple ? '' : `<button class="btn-sm" onclick="openEditModal('${group.instances[0]._id}', '${group.instances[0].nickname}', ${group.instances[0].current_score}); event.stopPropagation();">修正</button>`}
                     </td>
                 </tr>
             `;
+            
+            if (hasMultiple) {
+                group.instances.forEach(player => {
+                    html += `
+                        <tr class="${groupId} hidden" style="background: rgba(0,0,0,0.15);">
+                            <td style="text-align:right; color:var(--text-dim);">↳</td>
+                            <td style="color:var(--text-dim); font-size:13px;">房间对局记录</td>
+                            <td><code>${player.room_code || '未知'}</code></td>
+                            <td style="font-weight:700; color:${player.current_score >= 0 ? 'var(--success)' : 'var(--danger)'}">
+                                ${player.current_score}
+                            </td>
+                            <td>${player.is_host ? '👑 房主' : '👤 玩家'}</td>
+                            <td>
+                                <button class="btn-sm" onclick="openEditModal('${player._id}', '${player.nickname}', ${player.current_score})">修正</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
         });
         
         html += '</tbody></table></div>';
+        
+        const totalPages = Math.ceil(totalPlayers / PAGE_SIZE_PLAYERS) || 1;
+        html += `
+            <div class="pagination" style="margin-top: 15px; display: flex; justify-content: center; align-items: center; gap: 10px;">
+                <button class="btn-sm" ${page === 1 ? 'disabled' : ''} onclick="renderPlayers(${page - 1})">上一页</button>
+                <span style="color: var(--text-dim); font-size: 14px;">第 ${page} / ${totalPages} 页</span>
+                <button class="btn-sm" ${page >= totalPages ? 'disabled' : ''} onclick="renderPlayers(${page + 1})">下一页</button>
+            </div>
+        `;
+        
         contentArea.innerHTML = html;
+        
+        // 绑定折叠函数到全局
+        window.toggleGroup = function(groupId) {
+            document.querySelectorAll('.' + groupId).forEach(el => el.classList.toggle('hidden'));
+        };
     } catch (err) {
         console.error(err);
         contentArea.innerHTML = `<div class="error">加载失败: ${err.message}</div>`;

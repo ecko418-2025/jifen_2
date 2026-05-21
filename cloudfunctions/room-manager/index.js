@@ -271,7 +271,8 @@ exports.main = async (event, context) => {
             return { success: true, total: countRes.total };
           }
           case 'list': {
-            let listRes = await db.collection(collection).orderBy(collection === 'Rooms' ? 'created_at' : 'joined_at', 'desc').limit(limit || 20).get();
+            const skip = data.skip || 0;
+            let listRes = await db.collection(collection).orderBy(collection === 'Rooms' ? 'created_at' : 'joined_at', 'desc').skip(skip).limit(limit || 20).get();
             let dataList = listRes.data;
             
             // 如果是玩家列表，我们需要关联查询房间号
