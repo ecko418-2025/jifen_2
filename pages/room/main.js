@@ -32,7 +32,10 @@ Page({
     inputModalValue: '',
     inputModalType: 'number',
     isHost: false,
-    roomStatus: 'active'
+    roomStatus: 'active',
+    showTrend: false,
+    myCurrentScore: 0,
+    myMaxDelta: 0
   },
 
   async onLoad(options) {
@@ -259,6 +262,7 @@ Page({
         const val = Number(data.scores[p._id] || 0);
         if (val === 0) return null;
         return {
+          id: p._id,
           name: p.nickname,
           text: `${val > 0 ? '+' : ''}${val}`,
           type: val > 0 ? 'pos' : (val < 0 ? 'neg' : 'zero')
@@ -655,6 +659,221 @@ Page({
         }
       }
     });
+  },
+
+  async showTrendModal() {
+    if (!this.data.myPlayerId) {
+      wx.showToast({ title: '未找到您的玩家信息', icon: 'none' });
+      return;
+    }
+
+    const allHistory = {};
+    const currentTotals = {};
+    const maxDeltas = {};
+    
+    const playerIds = this.data.players.map(p => p._id);
+    playerIds.forEach(id => {
+      allHistory[id] = [];
+      currentTotals[id] = 0;
+      maxDeltas[id] = 0;
+    });
+
+    [...this.data.rounds].reverse().forEach(group => {
+      [...group.entries].reverse().forEach(entry => {
+        playerIds.forEach(id => {
+          const pEntry = entry.find(e => e.id === id);
+          if (pEntry) {
+            const val = parseInt(pEntry.text);
+            currentTotals[id] += val;
+            if (Math.abs(val) > maxDeltas[id]) maxDeltas[id] = Math.abs(val);
+          }
+          allHistory[id].push(currentTotals[id]);
+        });
+      });
+    });
+
+    if (playerIds.length === 0 || allHistory[playerIds[0]].length === 0) {
+      wx.showToast({ title: '暂无变动数据', icon: 'none' });
+      return;
+    }
+
+    this.setData({ 
+      showTrend: true,
+      allHistory: allHistory,
+      maxDeltas: maxDeltas,
+      trendType: 'me'
+    });
+    
+    this.updateTrendStats();
+  },
+
+  switchTrendType(e) {
+    const type = e.currentTarget.dataset.type;
+    this.setData({ trendType: type });
+    this.updateTrendStats();
+  },
+
+  updateTrendStats() {
+    const { allHistory, trendType, myPlayerId, maxDeltas } = this.data;
+    if (trendType === 'me') {
+      const history = allHistory[myPlayerId] || [];
+      const currentTotal = history.length > 0 ? history[history.length - 1] : 0;
+      this.setData({
+        myCurrentScore: currentTotal,
+        myMaxDelta: maxDeltas[myPlayerId] || 0
+      });
+      setTimeout(() => {
+        this.drawTrendCanvas([history], ['#6c63ff']);
+      }, 300);
+    } else {
+      const histories = [];
+      const colors = ['#6c63ff', '#e74c3c', '#2ecc71', '#f1c40f', '#e67e22', '#9b59b6', '#34495e', '#1abc9c', '#d35400', '#c0392b', '#16a085'];
+      const drawColors = [];
+      let totalMaxDelta = 0;
+      let overallMax = -Infinity;
+      let overallMin = Infinity;
+      const legendData = [];
+
+      this.data.players.forEach((p, i) => {
+        const hist = allHistory[p._id] || [];
+        if (hist.length > 0) {
+          histories.push(hist);
+          const c = colors[i % colors.length];
+          drawColors.push(c);
+          legendData.push({ name: p.nickname, color: c });
+
+          if (maxDeltas[p._id] > totalMaxDelta) totalMaxDelta = maxDeltas[p._id];
+
+          hist.forEach(val => {
+             if (val > overallMax) overallMax = val;
+             if (val < overallMin) overallMin = val;
+          });
+        }
+      });
+
+      if (overallMax === -Infinity) overallMax = 0;
+      if (overallMin === Infinity) overallMin = 0;
+
+      this.setData({
+        myMaxDelta: totalMaxDelta,
+        allMaxScore: overallMax,
+        allMinScore: overallMin,
+        trendLegend: legendData
+      });
+      setTimeout(() => {
+        this.drawTrendCanvas(histories, drawColors);
+      }, 300);
+    }
+  },
+
+  hideTrendModal() {
+    this.setData({ showTrend: false });
+  },
+
+  drawTrendCanvas(histories, colors) {
+    const query = wx.createSelectorQuery();
+    query.select('#trendCanvas')
+      .fields({ node: true, size: true })
+      .exec((res) => {
+        if (!res[0]) return;
+        const canvas = res[0].node;
+        const ctx = canvas.getContext('2d');
+        const width = res[0].width;
+        const height = res[0].height;
+
+        const dpr = wx.getSystemInfoSync().pixelRatio;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.scale(dpr, dpr);
+
+        ctx.clearRect(0, 0, width, height);
+
+        const padding = 40;
+        const chartWidth = width - padding * 2;
+        const chartHeight = height - padding * 2;
+
+        let minScore = 0;
+        let maxScore = 0;
+        let maxLength = 0;
+        histories.forEach(data => {
+            if (data.length > maxLength) maxLength = data.length;
+            const dataMin = Math.min(0, ...data);
+            const dataMax = Math.max(0, ...data);
+            if (dataMin < minScore) minScore = dataMin;
+            if (dataMax > maxScore) maxScore = dataMax;
+        });
+
+        const range = (maxScore - minScore) || 100;
+
+        const getX = (i) => padding + (i / (maxLength > 1 ? maxLength - 1 : 1)) * chartWidth;
+        const getY = (v) => padding + chartHeight - ((v - minScore) / range) * chartHeight;
+
+        // 1. 绘制背景网格和 0 线
+        ctx.strokeStyle = '#f0f0f0';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const zeroY = getY(0);
+        ctx.moveTo(padding, zeroY);
+        ctx.lineTo(width - padding, zeroY);
+        ctx.stroke();
+
+        // 2. 绘制每一条折线
+        histories.forEach((data, index) => {
+            const color = colors[index];
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = histories.length === 1 ? 3 : 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            
+            data.forEach((val, i) => {
+                if (i === 0) ctx.moveTo(getX(i), getY(val));
+                else ctx.lineTo(getX(i), getY(val));
+            });
+            ctx.stroke();
+
+            if (histories.length === 1) {
+                ctx.lineTo(getX(data.length - 1), zeroY);
+                ctx.lineTo(getX(0), zeroY);
+                const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+                gradient.addColorStop(0, `${color}33`);
+                gradient.addColorStop(1, `${color}00`);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                const maxVal = Math.max(...data);
+                const minVal = Math.min(...data);
+                const maxIndex = data.indexOf(maxVal);
+                const minIndex = data.indexOf(minVal);
+
+                data.forEach((val, i) => {
+                    ctx.beginPath();
+                    ctx.fillStyle = val >= 0 ? '#e74c3c' : '#27ae60';
+                    ctx.arc(getX(i), getY(val), 4, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.font = 'bold 12px sans-serif';
+                    if (i === data.length - 1) {
+                        ctx.fillStyle = '#333';
+                        ctx.fillText(val, getX(i) - 10, getY(val) - 10);
+                    } else if (i === maxIndex && val !== 0) {
+                        ctx.fillStyle = '#e74c3c';
+                        ctx.fillText('Max ' + val, getX(i) - 20, getY(val) - 10);
+                    } else if (i === minIndex && val !== 0) {
+                        ctx.fillStyle = '#27ae60';
+                        ctx.fillText('Min ' + val, getX(i) - 20, getY(val) + 18);
+                    }
+                });
+            } else {
+                data.forEach((val, i) => {
+                    ctx.beginPath();
+                    ctx.fillStyle = color;
+                    ctx.arc(getX(i), getY(val), 3, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+        });
+      });
   },
 
   onShareAppMessage() {

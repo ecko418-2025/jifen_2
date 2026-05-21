@@ -19,5 +19,35 @@
     </view>
   </view>
 
-  <button class="btn-back" bindtap="goHome">回到首页</button>
+  <view class="actions">
+    <button class="btn-trend" bindtap="showTrendModal">📈 查看积分走势</button>
+    <button class="btn-back" bindtap="goHome">回到首页</button>
+  </view>
+
+  <!-- 走势图弹窗 -->
+  <view class="trend-modal" wx:if="{{showTrend}}">
+    <view class="trend-mask" bindtap="hideTrendModal"></view>
+    <view class="trend-content">
+      <view class="trend-header">
+        <text class="trend-title">本局积分走势</text>
+        <text class="trend-close" bindtap="hideTrendModal">×</text>
+      </view>
+      <view class="trend-body">
+        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
+        <view class="trend-stats">
+          <view class="stat-item">
+            <text class="stat-label">我的最终分</text>
+            <text class="stat-val {{myCurrentScore >= 0 ? 'pos' : 'neg'}}">{{myCurrentScore}}</text>
+          </view>
+          <view class="stat-item">
+            <text class="stat-label">单局最高</text>
+            <text class="stat-val pos">+{{myMaxDelta}}</text>
+          </view>
+        </view>
+      </view>
+      <view class="trend-footer">
+        <button class="btn-close-trend" bindtap="hideTrendModal">确定</button>
+      </view>
+    </view>
+  </view>
 </view>

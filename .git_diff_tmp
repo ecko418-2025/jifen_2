@@ -1,0 +1,2295 @@
+diff --git a/admin-web/app.js b/admin-web/app.js
+index 705df7f..91d6a2c 100644
+--- a/admin-web/app.js
++++ b/admin-web/app.js
+@@ -4,12 +4,15 @@ const ENV_ID = 'cloud1-d2gpq0fat0dd3c17f'; // 你的环境 ID
+ const app = cloudbase.init({
+     env: ENV_ID
+ });
++const auth = app.auth();
+ const db = app.database();
+ const _ = db.command;
+ 
+ // 状态管理
+ let currentTab = 'dashboard';
+ let editingPlayerId = null;
++let qrPollTimer = null; // 二维码轮询定时器
++let activeTicketId = null; // 当前正在轮询 the Ticket
+ 
+ // 页面元素
+ const contentArea = document.getElementById('content-area');
+@@ -17,31 +20,419 @@ const tabTitle = document.getElementById('tab-title');
+ const envIdDisplay = document.getElementById('env-id');
+ const modal = document.getElementById('modal-overlay');
+ 
+-// 初始化
++// ==========================================
++// 统一的 API 数据读写服务 (支持双模式二选一登录)
++// ==========================================
++const api = {
++    // 检查当前是否是用 Session 登录（扫码登录模式）
++    isSessionMode() {
++        return !!localStorage.getItem('admin_session_token');
++    },
++    
++    // 获取当前的授权 Session Token
++    getSessionToken() {
++        return localStorage.getItem('admin_session_token');
++    },
++
++    // 核心的数据获取函数：获取记录总数
++    async getCount(collectionName) {
++        if (this.isSessionMode()) {
++            const res = await app.callFunction({
++                name: 'room-manager',
++                data: {
++                    action: 'adminAction',
++                    sessionToken: this.getSessionToken(),
++                    subAction: 'count',
++                    collection: collectionName
++                }
++            });
++            if (res.result && res.result.success) return { total: res.result.total };
++            throw new Error(res.result.error || '获取统计失败');
++        } else {
++            return await db.collection(collectionName).count();
++        }
++    },
++
++    // 核心的数据获取函数：获取记录列表
++    async getList(collectionName, limitSize) {
++        if (this.isSessionMode()) {
++            const res = await app.callFunction({
++                name: 'room-manager',
++                data: {
++                    action: 'adminAction',
++                    sessionToken: this.getSessionToken(),
++                    subAction: 'list',
++                    collection: collectionName,
++                    limit: limitSize
++                }
++            });
++            if (res.result && res.result.success) return { data: res.result.data };
++            throw new Error(res.result.error || '获取列表失败');
++        } else {
++            // 直接数据库模式：手动处理排序和关联
++            let query = db.collection(collectionName);
++            if (collectionName === 'Rooms') query = query.orderBy('created_at', 'desc');
++            if (collectionName === 'Players') query = query.orderBy('joined_at', 'desc');
++            
++            const res = await query.limit(limitSize).get();
++            let data = res.data;
++
++            // 如果是玩家列表，手动查一下对应的房间号
++            if (collectionName === 'Players' && data.length > 0) {
++                const roomIds = [...new Set(data.map(p => p.room_id).filter(id => id))];
++                if (roomIds.length > 0) {
++                    const roomsRes = await db.collection('Rooms').where({
++                        _id: _.in(roomIds)
++                    }).field({
++                        _id: true,
++                        room_code: true
++                    }).get();
++                    
++                    const roomMap = {};
++                    roomsRes.data.forEach(r => {
++                        roomMap[r._id] = r.room_code;
++                    });
++                    
++                    data = data.map(p => ({
++                        ...p,
++                        room_code: roomMap[p.room_id] || '未知'
++                    }));
++                }
++            }
++            return { data };
++        }
++    },
++
++    // 核心的数据修改函数：修正玩家分数
++    async updateScore(playerId, newScore) {
++        if (this.isSessionMode()) {
++            const res = await app.callFunction({
++                name: 'room-manager',
++                data: {
++                    action: 'adminAction',
++                    sessionToken: this.getSessionToken(),
++                    subAction: 'updateScore',
++                    playerId: playerId,
++                    score: newScore
++                }
++            });
++            if (res.result && res.result.success) return true;
++            throw new Error(res.result.error || '修改分数失败');
++        } else {
++            return await db.collection('Players').doc(playerId).update({
++                current_score: newScore,
++                update_time: db.serverDate()
++            });
++        }
++    },
++
++    // 核心的数据修改函数：结算房间 (同步生成快照)
++    async settleRoom(roomId) {
++        const res = await app.callFunction({
++            name: 'room-manager',
++            data: {
++                action: 'adminAction',
++                sessionToken: this.getSessionToken(),
++                subAction: 'settleRoom',
++                roomId: roomId
++            }
++        });
++        if (res.result && res.result.success) return true;
++        throw new Error(res.result.error || '结算失败');
++    },
++
++    // 核心的数据修改函数：彻底删除房间
++    async deleteRoom(roomId) {
++        const res = await app.callFunction({
++            name: 'room-manager',
++            data: {
++                action: 'adminAction',
++                sessionToken: this.getSessionToken(),
++                subAction: 'deleteRoom',
++                roomId: roomId
++            }
++        });
++        if (res.result && res.result.success) return true;
++        throw new Error(res.result.error || '删除失败');
++    },
++
++    // 批量自动结算
++    async batchAutoSettle(days) {
++        const res = await app.callFunction({
++            name: 'room-manager',
++            data: {
++                action: 'adminAction',
++                sessionToken: this.getSessionToken(),
++                subAction: 'batchAutoSettle',
++                expireDays: days
++            }
++        });
++        if (res.result && res.result.success) return res.result;
++        throw new Error(res.result.error || '批量操作失败');
++    }
++};
++
++// ==========================================
++// 初始化与生命周期
++// ==========================================
+ async function init() {
+     envIdDisplay.innerText = ENV_ID;
+     setupEventListeners();
+     
++    // 把切换 Tab 函数暴露给全局 onclick
++    window.switchLoginTab = switchLoginTab;
++    
++    try {
++        // 首先进行匿名登录，以确保能够调用云函数（无论什么登录模式，匿名登录都是底层安全底座，否则无法调用 app.callFunction）
++        const loginState = await auth.getLoginState();
++        if (!loginState) {
++            await auth.signInAnonymously();
++            console.log("匿名基础登录成功");
++        }
++
++        // 1. 判断是否持有扫码 sessionToken
++        if (api.isSessionMode()) {
++            try {
++                // 尝试用代理拉取一次数据来测试 session 是否依然有效
++                await api.getCount('Rooms');
++                console.log("SessionToken 验证成功，扫码模式登录");
++                document.getElementById('login-overlay').classList.add('hidden');
++                loadTab('dashboard');
++                return;
++            } catch (e) {
++                console.warn("SessionToken 已失效，自动注销", e);
++                localStorage.removeItem('admin_session_token');
++            }
++        }
++        
++        // 2. 检查是否有账号密码登录态（非匿名登录态）
++        const freshLoginState = await auth.getLoginState();
++        const loginType = freshLoginState ? String(freshLoginState.loginType || '').toLowerCase() : '';
++        const isRealLogin = freshLoginState && loginType !== 'anonymous' && loginType !== '' && !freshLoginState.isAnonymousUser;
++        
++        console.log("当前登录态:", loginType, "isAnonymous:", freshLoginState?.isAnonymousUser, "判定为真实登录:", isRealLogin);
++        
++        if (isRealLogin) {
++            console.log("账号密码登录态验证成功");
++            document.getElementById('login-overlay').classList.add('hidden');
++            loadTab('dashboard');
++        } else {
++            // 3. 两种登录态均无，显示登录框并绑定事件
++            document.getElementById('login-overlay').classList.remove('hidden');
++            document.getElementById('login-submit-btn').onclick = handleLogin;
++            
++            // 绑定键盘回车
++            document.getElementById('login-password').addEventListener('keypress', (e) => {
++                if (e.key === 'Enter') handleLogin();
++            });
++            document.getElementById('login-username').addEventListener('keypress', (e) => {
++                if (e.key === 'Enter') handleLogin();
++            });
++        }
++    } catch (err) {
++        console.error("检查登录态失败", err);
++    }
++}
++
++// ==========================================
++// 双登录方式二选一切换
++// ==========================================
++function switchLoginTab(mode) {
++    // 1. 样式更新
++    document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
++    document.getElementById(`tab-${mode}`).classList.add('active');
++    
++    // 2. 区域隐藏与显示
++    if (mode === 'password') {
++        document.getElementById('password-login-section').classList.remove('hidden');
++        document.getElementById('qrcode-login-section').classList.add('hidden');
++        // 停止二维码轮询
++        stopQRCodePolling();
++    } else {
++        document.getElementById('password-login-section').classList.add('hidden');
++        document.getElementById('qrcode-login-section').classList.remove('hidden');
++        // 开始加载二维码并轮询
++        startQRCodeLogin();
++    }
++}
++
++// 开始微信扫码登录流程
++async function startQRCodeLogin() {
++    stopQRCodePolling();
++    
++    const qrPlaceholder = document.getElementById('qrcode-loading');
++    const qrImg = document.getElementById('qrcode-img');
++    const successOverlay = document.getElementById('qrcode-success-overlay');
++    
++    // 重置 UI
++    qrPlaceholder.classList.remove('hidden');
++    qrImg.classList.add('hidden');
++    successOverlay.classList.add('hidden');
++    
++    try {
++        // 调用云函数，获取体验版 (trial) 的小程序登录码，方便开发者和管理员随时扫码
++        const res = await app.callFunction({
++          name: 'room-manager',
++          data: {
++              action: 'createLoginTicket',
++              data: { envVersion: 'trial' }
++          }
++        });
++        
++        if (res.result && res.result.success) {
++            activeTicketId = res.result.ticketId;
++            // 如果微信小程序码生成为空（例如本地小程序未发布），则降级为普通二维码，可通过小程序扫码功能扫描登录
++            qrImg.src = res.result.qrBase64 || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${res.result.ticketId}`;
++            
++            qrPlaceholder.classList.add('hidden');
++            qrImg.classList.remove('hidden');
++            
++            // 启动每 2 秒一次的轮询检测
++            qrPollTimer = setInterval(pollTicketStatus, 2000);
++        } else {
++            qrPlaceholder.innerHTML = `<p style="color:var(--danger)">生成失败: ${res.result.error || '未知错误'}</p>`;
++        }
++    } catch (err) {
++        console.error("生成登录二维码失败", err);
++        qrPlaceholder.innerHTML = `<p style="color:var(--danger)">生成失败，请检查网络</p>`;
++    }
++}
++
++// 轮询检查 Ticket 状态
++async function pollTicketStatus() {
++    if (!activeTicketId) return;
+     try {
+-        // 1. 必须先进行匿名登录才能访问数据库
+-        const auth = app.auth();
+-        await auth.anonymousAuthProvider().signIn();
+-        console.log("登录成功");
++        const res = await app.callFunction({
++            name: 'room-manager',
++            data: {
++                action: 'checkTicket',
++                data: { ticket: activeTicketId }
++            }
++        });
+         
+-        // 2. 登录成功后再加载数据
++        if (res.result && res.result.success) {
++            const status = res.result.status;
++            if (status === 'authorized') {
++                // 授权成功！
++                stopQRCodePolling();
++                document.getElementById('qrcode-success-overlay').classList.remove('hidden');
++                
++                // 将 sessionToken 写入 localStorage
++                localStorage.setItem('admin_session_token', res.result.sessionToken);
++                
++                // 1.5 秒后自动关闭遮罩并加载首页数据
++                setTimeout(() => {
++                    document.getElementById('login-overlay').classList.add('hidden');
++                    loadTab('dashboard');
++                }, 1500);
++            }
++        }
++    } catch (err) {
++        console.warn("轮询 Ticket 状态失败", err);
++    }
++}
++
++function stopQRCodePolling() {
++    if (qrPollTimer) {
++        clearInterval(qrPollTimer);
++        qrPollTimer = null;
++    }
++    activeTicketId = null;
++}
++
++// 处理用户名密码登录逻辑 (官方原生通道)
++async function handleLogin() {
++    const usernameInput = document.getElementById('login-username');
++    const passwordInput = document.getElementById('login-password');
++    const submitBtn = document.getElementById('login-submit-btn');
++    const errorMsg = document.getElementById('login-error-msg');
++
++    const username = usernameInput.value.trim();
++    const password = passwordInput.value.trim();
++
++    if (!username || !password) {
++        showLoginError("请输入管理员账号和密码");
++        return;
++    }
++
++    try {
++        submitBtn.innerText = "正在验证...";
++        submitBtn.disabled = true;
++        errorMsg.classList.add('hidden');
++
++        // 如果之前有扫码 Token，需要清除，确保走账号密码直连通道
++        localStorage.removeItem('admin_session_token');
++
++        // auth is global
++        
++        // 健壮性防冲突处理：先执行登出，清空之前的匿名登录态或其他冲突状态
++        try {
++            await auth.signOut();
++        } catch (e) {
++            console.warn("登出旧状态失败，可忽略:", e);
++        }
++        
++        // 使用用户名和密码登录（SDK v2 写法）
++        await auth.signIn({
++            signInMethod: 'username',
++            username: username,
++            password: password
++        });
++        
++        console.log("密码登录成功");
++        document.getElementById('login-overlay').classList.add('hidden');
+         loadTab('dashboard');
+     } catch (err) {
+-        console.error("初始化失败", err);
+-        contentArea.innerHTML = `
+-            <div class="error-box">
+-                <h3>🚫 访问受阻</h3>
+-                <p>${err.message}</p>
+-                <ul style="text-align:left; margin-top:10px; font-size:13px; color:var(--text-dim);">
+-                    <li>请检查云开发控制台是否开启了<b>“匿名登录”</b>（在“身份认证”->“登录方式”中）</li>
+-                    <li>请确保已将当前域名添加到<b>“Web 安全域名”</b>白名单中</li>
+-                </ul>
+-            </div>
+-        `;
++        console.error("登录失败", err);
++        const errStr = JSON.stringify(err || {}) + (err.message || '') + (err.code || '') + (err.error || '');
++        let msg = "账号或密码不正确";
++        if (errStr.includes("USER_NOT_FOUND")) {
++            msg = "该管理员账号不存在，请检查输入";
++        } else if (errStr.includes("INVALID_PASSWORD")) {
++            msg = "密码错误，请重新输入";
++        } else if (errStr.includes("first_login_password_update_required") || errStr.includes("FIRST_LOGIN_PASSWORD")) {
++            msg = "首次登录需修改密码！请前往腾讯云开发控制台 → 身份认证 → 用户管理 → 找到您的账号 → 重置密码，然后再回来登录。";
++        } else if (errStr.includes("OPERATION_FAIL")) {
++            msg = "操作失败，请确认云开发已开启用户名密码登录";
++        } else if (err.error_description) {
++            msg = err.error_description;
++        }
++        showLoginError(msg);
++    } finally {
++        submitBtn.innerText = "登 录";
++        submitBtn.disabled = false;
++    }
++}
++
++// 弹出密码登录错误提示
++function showLoginError(msg) {
++    const errorMsg = document.getElementById('login-error-msg');
++    errorMsg.innerText = `🚫 ${msg}`;
++    errorMsg.classList.remove('hidden');
++    
++    // 触发抖动动画
++    errorMsg.style.animation = 'none';
++    errorMsg.offsetHeight; /* 触发重绘 */
++    errorMsg.style.animation = null;
++}
++
++// 退出登录逻辑
++async function handleLogout() {
++    if (!confirm("确定要退出登录吗？")) return;
++    try {
++        stopQRCodePolling();
++        // 1. 清除 SessionToken
++        localStorage.removeItem('admin_session_token');
++        
++        // 2. 清除云开发原生登录态
++        // auth is global
++        await auth.signOut();
++        console.log("已成功退出登录");
++        
++        // 3. 刷新页面，重新显示登录框
++        window.location.reload();
++    } catch (err) {
++        alert("退出登录失败：" + err.message);
+     }
+ }
+ 
+@@ -60,6 +451,7 @@ function setupEventListeners() {
+ 
+     document.getElementById('cancel-btn').onclick = () => modal.classList.add('hidden');
+     document.getElementById('save-btn').onclick = saveNewScore;
++    document.getElementById('logout-btn').onclick = handleLogout;
+ }
+ 
+ // 切换标签页
+@@ -86,9 +478,9 @@ async function loadTab(tab) {
+ // 渲染仪表盘
+ async function renderDashboard() {
+     try {
+-        const roomsCount = await db.collection('Rooms').count();
+-        const playersCount = await db.collection('Players').count();
+-        const roundsCount = await db.collection('Rounds').count();
++        const roomsCount = await api.getCount('Rooms');
++        const playersCount = await api.getCount('Players');
++        const roundsCount = await api.getCount('Rounds');
+ 
+         contentArea.innerHTML = `
+             <div class="stats-grid">
+@@ -118,7 +510,7 @@ async function renderDashboard() {
+ // 渲染房间列表
+ async function renderRooms() {
+     try {
+-        const res = await db.collection('Rooms').limit(20).get();
++        const res = await api.getList('Rooms', 50);
+         const rooms = res.data || [];
+         
+         if (rooms.length === 0) {
+@@ -126,43 +518,143 @@ async function renderRooms() {
+             return;
+         }
+ 
++        // 计算每个房间的存活天数
++        const now = Date.now();
++
+         let html = `
++            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
++                <p style="color:var(--text-dim); font-size:13px;">共 ${rooms.length} 个房间</p>
++                <button class="btn-sm" style="background:var(--warning); color:#000; font-weight:600; padding:8px 16px;" onclick="handleBatchAutoSettle()">
++                    ⏰ 一键结算超时房间（>5天）
++                </button>
++            </div>
+             <div class="data-table-container">
+                 <table>
+                     <thead>
+                         <tr>
+                             <th>房间号</th>
+                             <th>状态</th>
+-                            <th>当前台面费</th>
++                            <th>台面费</th>
+                             <th>创建时间</th>
++                            <th>房龄</th>
++                            <th>操作</th>
+                         </tr>
+                     </thead>
+                     <tbody>
+         `;
+         
+         rooms.forEach(room => {
++            // 状态判断：active / settled / closed
++            let statusLabel, statusColor;
++            if (room.status === 'closed') {
++                statusLabel = '🔴 已关闭';
++                statusColor = 'var(--danger)';
++            } else if (room.status === 'settled') {
++                statusLabel = '🟡 已结算';
++                statusColor = 'var(--warning)';
++            } else {
++                statusLabel = '🟢 活跃中';
++                statusColor = 'var(--success)';
++            }
++
++            // 计算房龄
++            const createdAt = room.created_at ? new Date(room.created_at) : null;
++            let ageText = '未知';
++            let isExpired = false;
++            if (createdAt) {
++                const diffDays = Math.floor((now - createdAt.getTime()) / (24 * 3600 * 1000));
++                if (diffDays === 0) {
++                    ageText = '今天';
++                } else if (diffDays === 1) {
++                    ageText = '1天前';
++                } else {
++                    ageText = diffDays + '天前';
++                }
++                isExpired = diffDays >= 5;
++            }
++
++            // 操作按钮：根据状态显示不同按钮
++            let actions = '';
++            if (room.status === 'active') {
++                actions = `
++                    <button class="btn-sm" style="background:var(--warning);color:#000;margin-right:4px;" onclick="handleSettleRoom('${room._id}', '${room.room_code}')">结算</button>
++                    <button class="btn-sm" style="background:rgba(255,60,60,0.15);color:var(--danger);" onclick="handleDeleteRoom('${room._id}', '${room.room_code}')">删除</button>
++                `;
++            } else {
++                actions = `
++                    <button class="btn-sm" style="background:rgba(255,60,60,0.15);color:var(--danger);" onclick="handleDeleteRoom('${room._id}', '${room.room_code}')">删除</button>
++                `;
++            }
++
+             html += `
+-                <tr>
++                <tr style="${isExpired && room.status === 'active' ? 'background:rgba(255,180,0,0.05);' : ''}">
+                     <td><code>${room.room_code || 'N/A'}</code></td>
+-                    <td>${room.is_closed ? '🔴 已关闭' : '🟢 活跃中'}</td>
+-                    <td>${room.total_table_fee || 0}</td>
+-                    <td>${room.create_time ? new Date(room.create_time).toLocaleString() : '未知'}</td>
++                    <td style="color:${statusColor}; font-weight:600;">${statusLabel}</td>
++                    <td>${room.table_fee || 0}</td>
++                    <td>${createdAt ? createdAt.toLocaleString() : '未知'}</td>
++                    <td style="${isExpired ? 'color:var(--warning);font-weight:600;' : ''}">${ageText}${isExpired && room.status === 'active' ? ' ⚠️' : ''}</td>
++                    <td>${actions}</td>
+                 </tr>
+             `;
+         });
+         
+         html += '</tbody></table></div>';
+         contentArea.innerHTML = html;
++        
++        // 绑定到全局
++        window.handleSettleRoom = handleSettleRoom;
++        window.handleDeleteRoom = handleDeleteRoom;
++        window.handleBatchAutoSettle = handleBatchAutoSettle;
+     } catch (err) {
+         console.error(err);
+         contentArea.innerHTML = `<div class="error">加载失败: ${err.message}</div>`;
+     }
+ }
+ 
++// 处理结算房间
++async function handleSettleRoom(roomId, roomCode) {
++    if (!confirm(`确定将房间 [${roomCode}] 标记为"已结算"吗？\n结算后将生成最终分数快照，并停止记账。`)) return;
++    
++    try {
++        await api.settleRoom(roomId);
++        alert('房间已标记为已结算');
++        loadTab('rooms');
++    } catch (err) {
++        alert('结算失败: ' + err.message);
++    }
++}
++
++// 处理删除房间
++async function handleDeleteRoom(roomId, roomCode) {
++    if (!confirm(`⚠️ 确定要永久删除房间 [${roomCode}] 吗？\n\n此操作将同时删除该房间下的所有玩家记录和流水记录，且无法恢复！`)) return;
++    if (!confirm(`再次确认：真的要删除房间 [${roomCode}] 吗？数据不可恢复！`)) return;
++    
++    try {
++        await api.deleteRoom(roomId);
++        alert('房间及其关联数据已永久删除');
++        loadTab('rooms');
++    } catch (err) {
++        alert('删除失败: ' + err.message);
++    }
++}
++
++// 一键批量结算超时房间
++async function handleBatchAutoSettle() {
++    if (!confirm('确定要将所有超过 5 天的活跃房间自动标记为"已结算"吗？')) return;
++    
++    try {
++        const result = await api.batchAutoSettle(5);
++        alert(`批量结算完成！共结算了 ${result.settledCount} 个超时房间。`);
++        loadTab('rooms');
++    } catch (err) {
++        alert('批量结算失败: ' + err.message);
++    }
++}
++
+ // 渲染玩家列表
+ async function renderPlayers() {
+     try {
+-        const res = await db.collection('Players').limit(50).get();
++        const res = await api.getList('Players', 50);
+         const players = res.data || [];
+ 
+         if (players.length === 0) {
+@@ -177,6 +669,7 @@ async function renderPlayers() {
+                         <tr>
+                             <th>头像</th>
+                             <th>昵称</th>
++                            <th>所在房间</th>
+                             <th>当前分数</th>
+                             <th>角色</th>
+                             <th>操作</th>
+@@ -189,13 +682,14 @@ async function renderPlayers() {
+             html += `
+                 <tr>
+                     <td><img src="${player.avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;" onerror="this.src='https://mmbiz.qpic.cn/mmbiz_png/icTdbqWNOwNRna42FI242Lcia07xvkWModszK68mKzVnI6zXk7Sdl7n1icA2Ebicic4icib4X0kicqG4nBVzNszM1EicicHA/640?wx_fmt=png'"></td>
+-                    <td>${player.nick_name || '未知玩家'}</td>
++                    <td>${player.nickname || '未知玩家'}</td>
++                    <td><code>${player.room_code || '未知'}</code></td>
+                     <td style="font-weight:700; color:${player.current_score >= 0 ? 'var(--success)' : 'var(--danger)'}">
+                         ${player.current_score}
+                     </td>
+                     <td>${player.is_host ? '👑 房主' : '👤 玩家'}</td>
+                     <td>
+-                        <button class="btn-sm" onclick="openEditModal('${player._id}', '${player.nick_name}', ${player.current_score})">修正</button>
++                        <button class="btn-sm" onclick="openEditModal('${player._id}', '${player.nickname}', ${player.current_score})">修正</button>
+                     </td>
+                 </tr>
+             `;
+@@ -228,10 +722,7 @@ async function saveNewScore() {
+         btn.innerText = '保存中...';
+         btn.disabled = true;
+ 
+-        await db.collection('Players').doc(editingPlayerId).update({
+-            current_score: newScore,
+-            update_time: db.serverDate()
+-        });
++        await api.updateScore(editingPlayerId, newScore);
+ 
+         alert('修改成功！');
+         modal.classList.add('hidden');
+diff --git a/admin-web/index.html b/admin-web/index.html
+index f1df320..1c52823 100644
+--- a/admin-web/index.html
++++ b/admin-web/index.html
+@@ -4,8 +4,8 @@
+     <meta charset="UTF-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <title>狼人杀积分管理后台</title>
+-    <!-- 引入腾讯云开发完整版 Web SDK -->
+-    <script src="https://imgcache.qq.com/qcloud/cloudbase-js-sdk/1.5.0/cloudbase.full.js"></script>
++    <!-- 引入腾讯云开发 2.0.0 JS SDK 官方 CDN 地址 -->
++    <script src="https://static.cloudbase.net/cloudbase-js-sdk/2.17.3/cloudbase.full.js"></script>
+     <link rel="stylesheet" href="style.css">
+     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+ </head>
+@@ -30,6 +30,7 @@
+             </nav>
+             <div class="sidebar-footer">
+                 <p>Environment: <span id="env-id">加载中...</span></p>
++                <button id="logout-btn" class="logout-btn">🚪 退出登录</button>
+             </div>
+         </aside>
+ 
+@@ -73,6 +74,66 @@
+         </div>
+     </div>
+ 
++    <!-- 登录遮罩层，默认显示 -->
++    <div id="login-overlay" class="login-overlay">
++        <div class="login-box">
++            <div class="login-header">
++                <span class="login-logo-icon">🐺</span>
++                <h2>狼人杀积分助手</h2>
++                <p class="login-subtitle">后台管理系统</p>
++            </div>
++            
++            <div class="login-tabs">
++                <div id="tab-password" class="login-tab active" onclick="switchLoginTab('password')">密码登录</div>
++                <div id="tab-qrcode" class="login-tab" onclick="switchLoginTab('qrcode')">扫码登录</div>
++            </div>
++            
++            <!-- 密码登录区域 -->
++            <div id="password-login-section" class="login-section">
++                <div class="login-body">
++                    <div class="login-input-group">
++                        <label for="login-username">管理员账号</label>
++                        <div class="input-wrapper">
++                            <span class="input-icon">👤</span>
++                            <input type="text" id="login-username" placeholder="请输入管理员账号" autocomplete="username">
++                        </div>
++                    </div>
++                    
++                    <div class="login-input-group">
++                        <label for="login-password">安全密码</label>
++                        <div class="input-wrapper">
++                            <span class="input-icon">🔒</span>
++                            <input type="password" id="login-password" placeholder="请输入登录密码" autocomplete="current-password">
++                        </div>
++                    </div>
++                    
++                    <div id="login-error-msg" class="login-error-msg hidden"></div>
++                    
++                    <button id="login-submit-btn" class="login-submit-btn">登 录</button>
++                </div>
++            </div>
++            
++            <!-- 微信扫码区域 -->
++            <div id="qrcode-login-section" class="login-section hidden">
++                <div class="qrcode-container">
++                    <div id="qrcode-loading" class="qrcode-placeholder">
++                        <div class="qr-spinner"></div>
++                        <p>正在生成小程序码...</p>
++                    </div>
++                    <img id="qrcode-img" class="qrcode-img hidden" src="" alt="小程序登录码">
++                    <div id="qrcode-success-overlay" class="qrcode-success-overlay hidden">
++                        <span class="success-icon">✓</span>
++                        <p>扫码成功！正在登录...</p>
++                    </div>
++                </div>
++                <div class="qrcode-tips">
++                    <p class="main-tip">请使用微信扫描上方小程序码</p>
++                    <p class="sub-tip">仅限房主管理员扫码授权登录</p>
++                </div>
++            </div>
++        </div>
++    </div>
++
+     <script src="app.js"></script>
+ </body>
+ </html>
+diff --git a/admin-web/style.css b/admin-web/style.css
+index 8a90003..bfb742e 100644
+--- a/admin-web/style.css
++++ b/admin-web/style.css
+@@ -227,6 +227,11 @@ tr:hover td {
+     border-color: var(--primary);
+ }
+ 
++.btn-danger:hover {
++    background: var(--danger) !important;
++    border-color: var(--danger) !important;
++}
++
+ .btn-primary {
+     background: var(--primary);
+     color: white;
+@@ -314,3 +319,345 @@ input {
+     padding: 40px;
+     color: var(--text-dim);
+ }
++
++/* 退出登录按钮样式 */
++.logout-btn {
++    width: 100%;
++    margin-top: 16px;
++    background: rgba(239, 68, 68, 0.1);
++    color: #fca5a5;
++    border: 1px solid rgba(239, 68, 68, 0.2);
++    padding: 10px 16px;
++    border-radius: 12px;
++    font-size: 13px;
++    font-weight: 500;
++    cursor: pointer;
++    transition: all 0.3s ease;
++    display: flex;
++    align-items: center;
++    justify-content: center;
++    gap: 8px;
++}
++
++.logout-btn:hover {
++    background: #ef4444;
++    color: white;
++    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
++}
++
++/* 登录遮罩层样式 (🐺 狼人杀精致暗黑美学) */
++.login-overlay {
++    position: fixed;
++    top: 0;
++    left: 0;
++    width: 100%;
++    height: 100%;
++    background: radial-gradient(circle at center, rgba(15, 23, 42, 0.95), #020617);
++    backdrop-filter: blur(20px);
++    display: flex;
++    justify-content: center;
++    align-items: center;
++    z-index: 9999; /* 确保盖在所有之上 */
++    transition: opacity 0.4s ease, visibility 0.4s;
++}
++
++.login-overlay.hidden {
++    opacity: 0;
++    visibility: hidden;
++    pointer-events: none;
++}
++
++.login-box {
++    background: rgba(30, 41, 59, 0.45);
++    border: 1px solid rgba(255, 255, 255, 0.08);
++    width: 100%;
++    max-width: 420px;
++    padding: 40px;
++    border-radius: 28px;
++    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4), 
++                inset 0 1px 0 rgba(255, 255, 255, 0.1);
++    backdrop-filter: blur(10px);
++    animation: loginFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
++}
++
++@keyframes loginFadeIn {
++    from {
++        opacity: 0;
++        transform: translateY(20px);
++    }
++    to {
++        opacity: 1;
++        transform: translateY(0);
++    }
++}
++
++.login-header {
++    text-align: center;
++    margin-bottom: 32px;
++}
++
++.login-logo-icon {
++    font-size: 54px;
++    display: inline-block;
++    filter: drop-shadow(0 0 12px rgba(99, 102, 241, 0.4));
++    animation: floatLogo 3s ease-in-out infinite;
++}
++
++@keyframes floatLogo {
++    0%, 100% { transform: translateY(0); }
++    50% { transform: translateY(-8px); }
++}
++
++.login-header h2 {
++    font-size: 24px;
++    font-weight: 700;
++    margin-top: 12px;
++    background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
++    -webkit-background-clip: text;
++    -webkit-text-fill-color: transparent;
++    letter-spacing: -0.5px;
++}
++
++.login-subtitle {
++    font-size: 13px;
++    color: var(--text-dim);
++    margin-top: 4px;
++    letter-spacing: 2px;
++    text-transform: uppercase;
++}
++
++.login-body {
++    display: flex;
++    flex-direction: column;
++    gap: 20px;
++}
++
++.login-input-group {
++    display: flex;
++    flex-direction: column;
++    gap: 8px;
++}
++
++.login-input-group label {
++    font-size: 13px;
++    font-weight: 500;
++    color: var(--text-dim);
++    padding-left: 4px;
++}
++
++.input-wrapper {
++    position: relative;
++    display: flex;
++    align-items: center;
++}
++
++.input-icon {
++    position: absolute;
++    left: 14px;
++    font-size: 16px;
++    color: var(--text-dim);
++    pointer-events: none;
++}
++
++.input-wrapper input {
++    width: 100%;
++    background: rgba(15, 23, 42, 0.6);
++    border: 1px solid rgba(255, 255, 255, 0.08);
++    padding: 14px 14px 14px 44px;
++    border-radius: 14px;
++    color: white;
++    font-size: 15px;
++    outline: none;
++    transition: all 0.3s ease;
++}
++
++.input-wrapper input:focus {
++    border-color: var(--primary);
++    background: rgba(15, 23, 42, 0.8);
++    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
++}
++
++.login-error-msg {
++    background: rgba(239, 68, 68, 0.1);
++    color: #fca5a5;
++    border: 1px solid rgba(239, 68, 68, 0.2);
++    padding: 12px 16px;
++    border-radius: 12px;
++    font-size: 13px;
++    text-align: center;
++    line-height: 1.4;
++    animation: shakeError 0.4s ease-in-out;
++}
++
++@keyframes shakeError {
++    0%, 100% { transform: translateX(0); }
++    25% { transform: translateX(-6px); }
++    75% { transform: translateX(6px); }
++}
++
++.login-submit-btn {
++    background: linear-gradient(135deg, var(--primary) 0%, #4f46e5 100%);
++    color: white;
++    border: none;
++    padding: 14px;
++    border-radius: 14px;
++    font-size: 16px;
++    font-weight: 600;
++    cursor: pointer;
++    transition: all 0.3s ease;
++    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
++    margin-top: 10px;
++}
++
++.login-submit-btn:hover:not(:disabled) {
++    transform: translateY(-2px);
++    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
++    background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
++}
++
++.login-submit-btn:active:not(:disabled) {
++    transform: translateY(0);
++}
++
++.login-submit-btn:disabled {
++    opacity: 0.6;
++    cursor: not-allowed;
++    box-shadow: none;
++}
++
++/* 登录 Tab 选项卡样式 */
++.login-tabs {
++    display: flex;
++    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
++    margin-bottom: 28px;
++}
++
++.login-tab {
++    flex: 1;
++    text-align: center;
++    padding: 12px;
++    font-size: 15px;
++    font-weight: 600;
++    color: var(--text-dim);
++    cursor: pointer;
++    transition: all 0.3s ease;
++    position: relative;
++}
++
++.login-tab:hover {
++    color: var(--text-main);
++}
++
++.login-tab.active {
++    color: var(--primary);
++}
++
++.login-tab.active::after {
++    content: '';
++    position: absolute;
++    bottom: -1px;
++    left: 20%;
++    right: 20%;
++    height: 2px;
++    background: var(--primary);
++    box-shadow: 0 0 8px var(--primary);
++    border-radius: 2px;
++}
++
++/* 微信扫码登录展示样式 */
++.qrcode-container {
++    width: 260px;
++    height: 260px;
++    margin: 10px auto 30px auto;
++    background: #fff; /* 二维码背景通常白色更好扫 */
++    border: 8px solid rgba(255, 255, 255, 0.1);
++    border-radius: 28px;
++    display: flex;
++    justify-content: center;
++    align-items: center;
++    position: relative;
++    overflow: hidden;
++    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
++    padding: 12px;
++}
++
++.qrcode-placeholder {
++    display: flex;
++    flex-direction: column;
++    align-items: center;
++    gap: 12px;
++    color: #475569; /* 深色文字在白色背景上更清晰 */
++    font-size: 13px;
++}
++
++.qr-spinner {
++    width: 32px;
++    height: 32px;
++    border: 3px solid rgba(99, 102, 241, 0.1);
++    border-top-color: var(--primary);
++    border-radius: 50%;
++    animation: qr-spin 1s linear infinite;
++}
++
++@keyframes qr-spin {
++    to { transform: rotate(360deg); }
++}
++
++.qrcode-img {
++    width: 100%;
++    height: 100%;
++    object-fit: contain;
++    display: block;
++    animation: qr-fadeIn 0.5s ease;
++}
++
++@keyframes qr-fadeIn {
++    from { opacity: 0; transform: scale(0.95); }
++    to { opacity: 1; transform: scale(1); }
++}
++
++.qrcode-success-overlay {
++    position: absolute;
++    top: 0;
++    left: 0;
++    width: 100%;
++    height: 100%;
++    background: rgba(15, 23, 42, 0.9);
++    backdrop-filter: blur(4px);
++    display: flex;
++    flex-direction: column;
++    align-items: center;
++    justify-content: center;
++    gap: 12px;
++    animation: qr-fadeIn 0.3s ease;
++}
++
++.success-icon {
++    width: 48px;
++    height: 48px;
++    background: var(--success);
++    color: white;
++    font-size: 24px;
++    font-weight: bold;
++    display: flex;
++    align-items: center;
++    justify-content: center;
++    border-radius: 50%;
++    box-shadow: 0 0 15px var(--success);
++}
++
++.qrcode-tips {
++    text-align: center;
++}
++
++.qrcode-tips .main-tip {
++    font-size: 14px;
++    font-weight: 600;
++    color: var(--text-main);
++}
++
++.qrcode-tips .sub-tip {
++    font-size: 12px;
++    color: var(--text-dim);
++    margin-top: 4px;
++}
+diff --git a/app.json b/app.json
+index aa4afca..05f7335 100644
+--- a/app.json
++++ b/app.json
+@@ -4,7 +4,8 @@
+     "pages/room/main",
+     "pages/room/result",
+     "pages/lobby/rank",
+-    "pages/history/index"
++    "pages/history/index",
++    "pages/admin/login"
+   ],
+   "window": {
+     "backgroundTextStyle": "light",
+diff --git a/cloudfunctions/room-manager/index.js b/cloudfunctions/room-manager/index.js
+index c5e3bf1..919786e 100644
+--- a/cloudfunctions/room-manager/index.js
++++ b/cloudfunctions/room-manager/index.js
+@@ -86,10 +86,297 @@ function buildFinalSnapshot(players, tableFee) {
+ 
+ exports.main = async (event, context) => {
+   const { action, data } = event
+-  const { OPENID } = cloud.getWXContext()
++  const wxContext = cloud.getWXContext()
++  // 兼容微信小程序调用 (OPENID) 和 Web 端调用 (uid)
++  const OPENID = wxContext.OPENID || (context.auth ? context.auth.uid : null)
+ 
+   switch (action) {
+ 
++    // ─── 管理后台扫码登录鉴权 ──────────────────────────────────────────
++    
++    // 1. 检查是否为管理员/房主
++    case 'checkAdminStatus': {
++      try {
++        const countRes = await db.collection('Rooms').where({ host_id: OPENID }).count();
++        const isAdmin = countRes.total > 0;
++        
++        let nickname = '管理员';
++        if (isAdmin) {
++          const playerRes = await db.collection('Players').where({ user_id: OPENID, is_host: true }).limit(1).get();
++          if (playerRes.data.length > 0) {
++            nickname = playerRes.data[0].nickname;
++          }
++        }
++        return { success: true, isAdmin, nickname };
++      } catch (err) {
++        return { success: false, error: err.message };
++      }
++    }
++
++    // 2. 网页端创建登录 Ticket 并生成小程序码
++    case 'createLoginTicket': {
++      try {
++        const { envVersion } = data || {};
++        const ticketId = 'L_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
++        
++        // 写入 AdminLogins 记录
++        await db.collection('AdminLogins').add({
++          data: {
++            ticket_id: ticketId,
++            status: 'pending',
++            created_at: db.serverDate()
++          }
++        });
++        
++        let qrBase64 = '';
++        try {
++          // 生成小程序码（直接携带 ticketId 作为 scene）
++          const qrRes = await cloud.openapi.wxacode.getUnlimited({
++            scene: ticketId,
++            page: 'pages/index/index',
++            checkPath: false,
++            envVersion: envVersion || 'release'
++          });
++          qrBase64 = `data:image/png;base64,${qrRes.buffer.toString('base64')}`;
++        } catch (qrErr) {
++          console.warn('微信小程序码生成失败，开启备用普通二维码：', qrErr.message);
++        }
++        
++        return { success: true, ticketId, qrBase64 };
++      } catch (err) {
++        return { success: false, error: err.message };
++      }
++    }
++
++    // 2.5 网页端轮询检查 Ticket 授权状态
++    case 'checkTicket': {
++      try {
++        const { ticket } = data || {};
++        if (!ticket) return { success: false, error: '缺少 ticket 参数' };
++        
++        const res = await db.collection('AdminLogins').where({ ticket_id: ticket }).limit(1).get();
++        if (res.data.length === 0) return { success: false, error: '该二维码记录不存在' };
++        
++        const ticketDoc = res.data[0];
++        return { 
++          success: true, 
++          status: ticketDoc.status, 
++          sessionToken: ticketDoc.session_token || '' 
++        };
++      } catch (err) {
++        return { success: false, error: err.message };
++      }
++    }
++
++    // 3. 小程序端管理员扫码后点击“确认授权”
++    case 'adminAuthorizeTicket': {
++      try {
++        const { ticket } = data;
++        if (!ticket) return { success: false, error: '缺少 ticket 参数' };
++        
++        // 验证扫码者是不是房主管理员
++        const countRes = await db.collection('Rooms').where({ host_id: OPENID }).count();
++        if (countRes.total === 0) return { success: false, error: '无权操作，您不是房主管理员' };
++        
++        // 获取并校验该 Ticket
++        const loginRes = await db.collection('AdminLogins').where({ ticket_id: ticket }).limit(1).get();
++        if (loginRes.data.length === 0) return { success: false, error: '登录请求已失效或不存在' };
++        
++        const ticketDoc = loginRes.data[0];
++        if (ticketDoc.status !== 'pending') return { success: false, error: '该二维码已被使用或失效' };
++        
++        // 生成 sessionToken
++        const sessionToken = 'S_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
++        
++        // 更新 Ticket 状态，并绑定 sessionToken
++        await db.collection('AdminLogins').doc(ticketDoc._id).update({
++          data: {
++            status: 'authorized',
++            authorized_openid: OPENID,
++            session_token: sessionToken,
++            authorized_at: db.serverDate()
++          }
++        });
++        
++        // 写入 AdminSessions 集合
++        await db.collection('AdminSessions').add({
++          data: {
++            token: sessionToken,
++            openid: OPENID,
++            created_at: db.serverDate(),
++            expire_time: Date.now() + 2 * 3600 * 1000 // 2小时后过期
++          }
++        });
++        
++        return { success: true };
++      } catch (err) {
++        return { success: false, error: err.message };
++      }
++    }
++
++    // 4. 管理员动作代理核心接口（对网页端的读写操作进行 Session 校验和代理）
++    case 'adminAction': {
++      try {
++        const { sessionToken, subAction, collection, limit, playerId, score } = data || {};
++        
++        let isAdmin = false;
++        let authorizedOpenid = OPENID;
++
++        // 【方式 A】: 校验 SessionToken (扫码登录模式)
++        if (sessionToken) {
++          const sessionRes = await db.collection('AdminSessions').where({ token: sessionToken }).limit(1).get();
++          if (sessionRes.data.length > 0) {
++            const session = sessionRes.data[0];
++            if (session.expire_time > Date.now()) {
++              isAdmin = true;
++              authorizedOpenid = session.openid;
++            } else {
++              return { success: false, error: '会话已过期，请重新登录' };
++            }
++          } else {
++            return { success: false, error: '无效的会话令牌' };
++          }
++        } 
++        
++        // 【方式 B】: 校验当前 OPENID/UID 是否为管理员 (账号密码或微信登录)
++        if (!isAdmin) {
++          // 1. 尝试从数据库校验（是否是某个房间的房主）
++          if (OPENID) {
++            const countRes = await db.collection('Rooms').where({ host_id: OPENID }).count();
++            if (countRes.total > 0) {
++              isAdmin = true;
++            }
++          }
++          
++          // 2. 特殊逻辑：如果是 Web 端账号密码登录 (loginType 为 username)
++          // 在 TCB 中，能用账号密码登录 Web SDK 的通常就是开发者/管理员
++          if (!isAdmin && context.auth && context.auth.loginType === 'username') {
++            isAdmin = true;
++            authorizedOpenid = context.auth.uid;
++          }
++        }
++
++        if (!isAdmin) {
++          return { 
++            success: false, 
++            error: '权限不足', 
++            debug: { hasOpenid: !!OPENID, hasAuth: !!context.auth } 
++          };
++        }
++        
++        // 验证通过，代理执行数据库操作
++        switch (subAction) {
++          case 'count': {
++            const countRes = await db.collection(collection).count();
++            return { success: true, total: countRes.total };
++          }
++          case 'list': {
++            let listRes = await db.collection(collection).orderBy(collection === 'Rooms' ? 'created_at' : 'joined_at', 'desc').limit(limit || 20).get();
++            let dataList = listRes.data;
++            
++            // 如果是玩家列表，我们需要关联查询房间号
++            if (collection === 'Players' && dataList.length > 0) {
++              const roomIds = [...new Set(dataList.map(p => p.room_id))];
++              const roomsRes = await db.collection('Rooms').where({
++                _id: _.in(roomIds)
++              }).field({
++                _id: true,
++                room_code: true
++              }).get();
++              
++              const roomMap = {};
++              roomsRes.data.forEach(r => {
++                roomMap[r._id] = r.room_code;
++              });
++              
++              dataList = dataList.map(p => ({
++                ...p,
++                room_code: roomMap[p.room_id] || '未知'
++              }));
++            }
++            
++            return { success: true, data: dataList };
++          }
++          case 'updateScore': {
++            if (!playerId || score === undefined) return { success: false, error: '参数错误' };
++            await db.collection('Players').doc(playerId).update({
++              data: {
++                current_score: score,
++                update_time: db.serverDate()
++              }
++            });
++            return { success: true };
++          }
++          case 'settleRoom': {
++            const { roomId } = data || {};
++            if (!roomId) return { success: false, error: '缺少房间 ID' };
++            
++            const roomRes = await db.collection('Rooms').doc(roomId).get();
++            const room = roomRes.data;
++            if (!room) return { success: false, error: '房间不存在' };
++            if (room.status === 'closed') return { success: true, msg: '房间已结算' };
++            
++            const playersRes = await db.collection('Players').where({ room_id: roomId }).limit(1000).get();
++            const players = playersRes.data || [];
++            const finalSnapshot = buildFinalSnapshot(players, Number(room.table_fee || 0));
++
++            await db.collection('Rooms').doc(roomId).update({
++              data: {
++                status: 'closed',
++                closed_at: db.serverDate(),
++                closed_by: 'ADMIN_' + authorizedOpenid,
++                final_snapshot: finalSnapshot
++              }
++            });
++            return { success: true };
++          }
++          case 'deleteRoom': {
++            const { roomId } = data || {};
++            if (!roomId) return { success: false, error: '缺少房间 ID' };
++            
++            // 物理删除房间及关联数据
++            await Promise.all([
++              db.collection('Rooms').doc(roomId).remove(),
++              db.collection('Players').where({ room_id: roomId }).remove(),
++              db.collection('Rounds').where({ room_id: roomId }).remove()
++            ]);
++            
++            return { success: true };
++          }
++          case 'batchAutoSettle': {
++            const expireDays = data.expireDays || 5;
++            const cutoffTime = new Date(Date.now() - expireDays * 24 * 3600 * 1000);
++            const activeRoomsRes = await db.collection('Rooms').where({ status: 'active' }).limit(100).get();
++            let settledCount = 0;
++            
++            for (const room of activeRoomsRes.data) {
++              const createdAt = room.created_at ? new Date(room.created_at) : null;
++              if (createdAt && createdAt < cutoffTime) {
++                const playersRes = await db.collection('Players').where({ room_id: room._id }).limit(1000).get();
++                const players = playersRes.data || [];
++                const finalSnapshot = buildFinalSnapshot(players, Number(room.table_fee || 0));
++                
++                await db.collection('Rooms').doc(room._id).update({
++                  data: {
++                    status: 'closed',
++                    closed_at: db.serverDate(),
++                    closed_by: 'ADMIN_BATCH',
++                    final_snapshot: finalSnapshot
++                  }
++                });
++                settledCount++;
++              }
++            }
++            return { success: true, settledCount };
++          }
++          default:
++            return { success: false, error: '不支持的操作' };
++        }
++      } catch (err) {
++        return { success: false, error: err.message };
++      }
++    }
++
+     // ─── 首页数据 ──────────────────────────────────────────────────────────
+     case 'getHomeData': {
+       try {
+diff --git a/pages/history/index.js b/pages/history/index.js
+index 2405dad..858280e 100644
+--- a/pages/history/index.js
++++ b/pages/history/index.js
+@@ -1,10 +1,15 @@
+ Page({
+   data: {
+     rooms: [],
+-    loading: true
++    loading: true,
++    showTrend: false,
++    trendRoomCode: '',
++    trendFinalScore: 0,
++    trendMaxDelta: 0
+   },
+ 
+-  onLoad() {
++  async onLoad() {
++    await this.ensureOpenid();
+     this.loadHistory()
+   },
+ 
+@@ -12,6 +17,19 @@ Page({
+     this.loadHistory()
+   },
+ 
++  async ensureOpenid() {
++    if (this.myOpenid) return;
++    try {
++      const res = await wx.cloud.callFunction({
++        name: 'room-manager',
++        data: { action: 'getOpenid' }
++      });
++      this.myOpenid = res.result.openid;
++    } catch (e) {
++      console.error('获取身份失败', e);
++    }
++  },
++
+   async loadHistory() {
+     this.setData({ loading: true })
+     try {
+@@ -29,6 +47,163 @@ Page({
+     }
+   },
+ 
++  async showRoomTrend(e) {
++    const { id, code } = e.currentTarget.dataset;
++    wx.showLoading({ title: '加载数据...', mask: true });
++
++    try {
++      // 1. 确保有 OpenID
++      await this.ensureOpenid();
++      if (!this.myOpenid) throw new Error('身份识别失败，请检查网络');
++
++      // 2. 获取该房间所有流水记录
++      const res = await wx.cloud.callFunction({
++        name: 'room-manager',
++        data: { action: 'getRounds', data: { room_id: id } }
++      });
++
++      if (!res.result || !res.result.success) throw new Error('数据拉取失败');
++      
++      const rawRounds = res.result.rounds || [];
++      if (rawRounds.length === 0) {
++        wx.showToast({ title: '该房间暂无变动记录', icon: 'none' });
++        return;
++      }
++
++      // 3. 查找我当前用户的 Player 记录 (改用 user_id 匹配，更稳定)
++      const db = wx.cloud.database();
++      const playerRes = await db.collection('Players').where({ 
++        room_id: id,
++        user_id: this.myOpenid
++      }).limit(1).get();
++
++      if (playerRes.data.length === 0) throw new Error('未找到您的玩家记录');
++      const myPlayerId = playerRes.data[0]._id;
++
++      // 4. 计算趋势序列 (正序计算)
++      const history = [];
++      let currentTotal = 0;
++      let maxDelta = 0;
++
++      [...rawRounds].reverse().forEach(round => {
++        const val = parseInt(round.scores[myPlayerId] || 0);
++        if (val !== 0) {
++          currentTotal += val;
++          if (Math.abs(val) > maxDelta) maxDelta = Math.abs(val);
++          history.push(currentTotal);
++        }
++      });
++
++      if (history.length === 0) {
++        wx.showToast({ title: '暂无变动数据', icon: 'none' });
++        return;
++      }
++
++      this.setData({
++        showTrend: true,
++        trendRoomCode: code,
++        trendFinalScore: currentTotal,
++        trendMaxDelta: maxDelta
++      });
++
++      wx.hideLoading();
++
++      // 延迟绘图
++      setTimeout(() => {
++        this.drawTrendCanvas(history);
++      }, 300);
++
++    } catch (err) {
++      console.error(err);
++      wx.hideLoading();
++      wx.showToast({ title: err.message || '加载走势失败', icon: 'none' });
++    }
++  },
++
++  hideTrendModal() {
++    this.setData({ showTrend: false });
++  },
++
++  drawTrendCanvas(data) {
++    const query = wx.createSelectorQuery();
++    query.select('#trendCanvas')
++      .fields({ node: true, size: true })
++      .exec((res) => {
++        if (!res[0]) return;
++        const canvas = res[0].node;
++        const ctx = canvas.getContext('2d');
++        const width = res[0].width;
++        const height = res[0].height;
++
++        const dpr = wx.getSystemInfoSync().pixelRatio;
++        canvas.width = width * dpr;
++        canvas.height = height * dpr;
++        ctx.scale(dpr, dpr);
++
++        const padding = 40;
++        const chartWidth = width - padding * 2;
++        const chartHeight = height - padding * 2;
++
++        const minScore = Math.min(0, ...data);
++        const maxScore = Math.max(0, ...data);
++        const range = (maxScore - minScore) || 100;
++
++        const getX = (i) => padding + (i / (data.length > 1 ? data.length - 1 : 1)) * chartWidth;
++        const getY = (v) => padding + chartHeight - ((v - minScore) / range) * chartHeight;
++
++        ctx.strokeStyle = '#f0f0f0';
++        ctx.lineWidth = 1;
++        ctx.beginPath();
++        const zeroY = getY(0);
++        ctx.moveTo(padding, zeroY);
++        ctx.lineTo(width - padding, zeroY);
++        ctx.stroke();
++
++        ctx.beginPath();
++        ctx.strokeStyle = '#6c63ff';
++        ctx.lineWidth = 3;
++        ctx.lineJoin = 'round';
++        ctx.lineCap = 'round';
++        data.forEach((val, i) => {
++          if (i === 0) ctx.moveTo(getX(i), getY(val));
++          else ctx.lineTo(getX(i), getY(val));
++        });
++        ctx.stroke();
++
++        ctx.lineTo(getX(data.length - 1), zeroY);
++        ctx.lineTo(getX(0), zeroY);
++        const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
++        gradient.addColorStop(0, 'rgba(108, 99, 255, 0.2)');
++        gradient.addColorStop(1, 'rgba(108, 99, 255, 0)');
++        ctx.fillStyle = gradient;
++        ctx.fill();
++
++        const maxVal = Math.max(...data);
++        const minVal = Math.min(...data);
++        const maxIndex = data.indexOf(maxVal);
++        const minIndex = data.indexOf(minVal);
++
++        data.forEach((val, i) => {
++          ctx.beginPath();
++          ctx.fillStyle = val >= 0 ? '#e74c3c' : '#27ae60';
++          ctx.arc(getX(i), getY(val), 4, 0, Math.PI * 2);
++          ctx.fill();
++          
++          ctx.font = 'bold 12px sans-serif';
++          if (i === data.length - 1) {
++            ctx.fillStyle = '#333';
++            ctx.fillText(val, getX(i) - 10, getY(val) - 10);
++          } else if (i === maxIndex && val !== 0) {
++            ctx.fillStyle = '#e74c3c';
++            ctx.fillText('Max ' + val, getX(i) - 20, getY(val) - 10);
++          } else if (i === minIndex && val !== 0) {
++            ctx.fillStyle = '#27ae60';
++            ctx.fillText('Min ' + val, getX(i) - 20, getY(val) + 18);
++          }
++        });
++      });
++  },
++
+   enterRoom(e) {
+     const id = e.currentTarget.dataset.id
+     wx.navigateTo({ url: `/pages/room/main?id=${id}` })
+diff --git a/pages/history/index.wxml b/pages/history/index.wxml
+index 9de12ab..5f9e653 100644
+--- a/pages/history/index.wxml
++++ b/pages/history/index.wxml
+@@ -17,8 +17,13 @@
+           <text class="room-date">{{item.date_str}}</text>
+         </view>
+       </view>
+-      <view class="room-score {{item.my_score > 0 ? 'pos' : (item.my_score < 0 ? 'neg' : '')}}">
+-        {{item.my_score > 0 ? '+' : ''}}{{item.my_score}}
++      <view class="room-side">
++        <view class="room-score {{item.my_score > 0 ? 'pos' : (item.my_score < 0 ? 'neg' : '')}}">
++          {{item.my_score > 0 ? '+' : ''}}{{item.my_score}}
++        </view>
++        <view class="trend-btn-mini" catchtap="showRoomTrend" data-id="{{item.room_id}}" data-code="{{item.room_code}}">
++          📈 走势
++        </view>
+       </view>
+     </view>
+ 
+@@ -27,5 +32,32 @@
+     </view>
+   </scroll-view>
+ 
++  <!-- 走势图弹窗 -->
++  <view class="trend-modal" wx:if="{{showTrend}}">
++    <view class="trend-mask" bindtap="hideTrendModal"></view>
++    <view class="trend-content">
++      <view class="trend-header">
++        <text class="trend-title">房间 [{{trendRoomCode}}] 积分走势</text>
++        <text class="trend-close" bindtap="hideTrendModal">×</text>
++      </view>
++      <view class="trend-body">
++        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
++        <view class="trend-stats">
++          <view class="stat-item">
++            <text class="stat-label">最终总分</text>
++            <text class="stat-val {{trendFinalScore >= 0 ? 'pos' : 'neg'}}">{{trendFinalScore}}</text>
++          </view>
++          <view class="stat-item">
++            <text class="stat-label">单局最高</text>
++            <text class="stat-val pos">+{{trendMaxDelta}}</text>
++          </view>
++        </view>
++      </view>
++      <view class="trend-footer">
++        <button class="btn-close-trend" bindtap="hideTrendModal">确定</button>
++      </view>
++    </view>
++  </view>
++
+   <view class="footer-tip">* 长按可以隐藏不再想看到的房间</view>
+ </view>
+diff --git a/pages/history/index.wxss b/pages/history/index.wxss
+index 1c050fc..10755b6 100644
+--- a/pages/history/index.wxss
++++ b/pages/history/index.wxss
+@@ -103,14 +103,51 @@
+   color: #999;
+ }
+ 
++.room-side {
++  display: flex;
++  flex-direction: column;
++  align-items: flex-end;
++}
++
+ .room-score {
+   font-size: 32rpx;
+   font-weight: bold;
++  margin-bottom: 8rpx;
++}
++
++.trend-btn-mini {
++  font-size: 20rpx;
++  color: #6c63ff;
++  background: rgba(108, 99, 255, 0.08);
++  padding: 4rpx 12rpx;
++  border-radius: 20rpx;
++  border: 1rpx solid rgba(108, 99, 255, 0.2);
+ }
+ 
+ .pos { color: #e74c3c !important; }
+ .neg { color: #27ae60 !important; }
+ 
++/* 走势图弹窗 */
++.trend-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; display: flex; align-items: center; justify-content: center; }
++.trend-mask { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px); }
++.trend-content { position: relative; width: 680rpx; background: #fff; border-radius: 32rpx; overflow: hidden; animation: popIn 0.3s ease-out; display: flex; flex-direction: column; }
++.trend-header { padding: 30rpx 40rpx; display: flex; justify-content: space-between; align-items: center; border-bottom: 1rpx solid #eee; }
++.trend-title { font-size: 28rpx; font-weight: bold; color: #333; }
++.trend-close { font-size: 40rpx; color: #999; padding: 10rpx; }
++.trend-body { padding: 40rpx; display: flex; flex-direction: column; }
++.trend-canvas { width: 100%; height: 400rpx; background: #fcfcfc; border-radius: 12rpx; }
++.trend-stats { display: flex; justify-content: space-around; margin-top: 40rpx; padding: 30rpx; background: #f8f9fa; border-radius: 20rpx; }
++.stat-item { display: flex; flex-direction: column; align-items: center; }
++.stat-label { font-size: 22rpx; color: #999; margin-bottom: 8rpx; }
++.stat-val { font-size: 36rpx; font-weight: bold; }
++.trend-footer { padding: 0 40rpx 50rpx; }
++.btn-close-trend { width: 100% !important; height: 88rpx; background: #6c63ff; color: #fff; font-size: 28rpx; border-radius: 44rpx; display: flex; align-items: center; justify-content: center; margin: 0 !important; }
++
++@keyframes popIn {
++  from { transform: scale(0.8); opacity: 0; }
++  to { transform: scale(1); opacity: 1; }
++}
++
+ .empty-tip {
+   text-align: center;
+   color: #999;
+diff --git a/pages/index/index.js b/pages/index/index.js
+index 8634c08..5bb6cb9 100644
+--- a/pages/index/index.js
++++ b/pages/index/index.js
+@@ -31,9 +31,15 @@ Page({
+     if (options.roomId) {
+       wx.navigateTo({ url: `/pages/room/main?id=${options.roomId}` })
+     } else if (options.scene) {
+-      // 处理小程序码扫码进入（scene 参数是 roomId）
+-      const roomId = decodeURIComponent(options.scene)
+-      wx.navigateTo({ url: `/pages/room/main?id=${roomId}` })
++      // 处理小程序码扫码进入
++      const sceneVal = decodeURIComponent(options.scene)
++      if (sceneVal.startsWith('L_')) {
++        // 如果是以 L_ 开头，说明是后台登录扫码，跳转到授权登录页
++        wx.navigateTo({ url: `/pages/admin/login?ticket=${sceneVal}` })
++      } else {
++        // 否则认为是普通的 roomId 进入房间
++        wx.navigateTo({ url: `/pages/room/main?id=${sceneVal}` })
++      }
+     }
+ 
+     this.refreshHomeData()
+@@ -269,8 +275,11 @@ Page({
+         const val = res.result
+         if (!val) return
+         
+-        // 如果是 6 位纯数字，按房间号进入
+-        if (/^\d{6}$/.test(val)) {
++        if (val.startsWith('L_')) {
++          // 如果是后台登录普通二维码，跳转到授权登录页
++          wx.navigateTo({ url: `/pages/admin/login?ticket=${val}` })
++        } else if (/^\d{6}$/.test(val)) {
++          // 如果是 6 位纯数字，按房间号进入
+           this.enterByCode(val)
+         } else {
+           // 否则尝试作为 roomId 直接跳转
+diff --git a/pages/room/main.js b/pages/room/main.js
+index 89b35ea..febee09 100644
+--- a/pages/room/main.js
++++ b/pages/room/main.js
+@@ -32,7 +32,10 @@ Page({
+     inputModalValue: '',
+     inputModalType: 'number',
+     isHost: false,
+-    roomStatus: 'active'
++    roomStatus: 'active',
++    showTrend: false,
++    myCurrentScore: 0,
++    myMaxDelta: 0
+   },
+ 
+   async onLoad(options) {
+@@ -657,6 +660,149 @@ Page({
+     });
+   },
+ 
++  async showTrendModal() {
++    if (!this.data.myPlayerId) {
++      wx.showToast({ title: '未找到您的玩家信息', icon: 'none' });
++      return;
++    }
++
++    const myId = this.data.myPlayerId;
++    const history = [];
++    let currentTotal = 0;
++    let maxDelta = 0;
++
++    // 1. 从原始 rounds 中提取我这一列的得分 (rounds 是按时间倒序排列的，我们需要正序计算)
++    // 注意：rounds 数据结构是 [{groupKey, time_str, entries: [[{name, text, type}]]}]
++    // 这里的 entries 是分组后的，我们需要回到原始打平的流水数据。
++    // 为了简单，我们直接从 data.rounds 中反推。
++    
++    // 获取平铺的原始打分记录 (正序)
++    const flatRounds = [];
++    [...this.data.rounds].reverse().forEach(group => {
++      [...group.entries].reverse().forEach(entry => {
++        // 查找我的得分
++        const myEntry = entry.find(e => e.name === wx.getStorageSync('nickname'));
++        if (myEntry) {
++          const val = parseInt(myEntry.text);
++          currentTotal += val;
++          if (Math.abs(val) > maxDelta) maxDelta = Math.abs(val);
++          history.push(currentTotal);
++        }
++      });
++    });
++
++    if (history.length === 0) {
++      wx.showToast({ title: '暂无变动数据', icon: 'none' });
++      return;
++    }
++
++    this.setData({ 
++      showTrend: true,
++      myCurrentScore: currentTotal,
++      myMaxDelta: maxDelta
++    });
++
++    // 给一点时间让 WXML 渲染出 Canvas 节点
++    setTimeout(() => {
++      this.drawTrendCanvas(history);
++    }, 300);
++  },
++
++  hideTrendModal() {
++    this.setData({ showTrend: false });
++  },
++
++  drawTrendCanvas(data) {
++    const query = wx.createSelectorQuery();
++    query.select('#trendCanvas')
++      .fields({ node: true, size: true })
++      .exec((res) => {
++        if (!res[0]) return;
++        const canvas = res[0].node;
++        const ctx = canvas.getContext('2d');
++        const width = res[0].width;
++        const height = res[0].height;
++
++        // 处理高清屏缩放
++        const dpr = wx.getSystemInfoSync().pixelRatio;
++        canvas.width = width * dpr;
++        canvas.height = height * dpr;
++        ctx.scale(dpr, dpr);
++
++        // 绘图参数
++        const padding = 40;
++        const chartWidth = width - padding * 2;
++        const chartHeight = height - padding * 2;
++
++        // 计算值域
++        const minScore = Math.min(0, ...data);
++        const maxScore = Math.max(0, ...data);
++        const range = (maxScore - minScore) || 100;
++
++        // 辅助函数：坐标转换
++        const getX = (i) => padding + (i / (data.length > 1 ? data.length - 1 : 1)) * chartWidth;
++        const getY = (v) => padding + chartHeight - ((v - minScore) / range) * chartHeight;
++
++        // 1. 绘制背景网格和 0 线
++        ctx.strokeStyle = '#f0f0f0';
++        ctx.lineWidth = 1;
++        ctx.beginPath();
++        const zeroY = getY(0);
++        ctx.moveTo(padding, zeroY);
++        ctx.lineTo(width - padding, zeroY);
++        ctx.stroke();
++
++        // 2. 绘制折线
++        ctx.beginPath();
++        ctx.strokeStyle = '#6c63ff';
++        ctx.lineWidth = 3;
++        ctx.lineJoin = 'round';
++        ctx.lineCap = 'round';
++        
++        data.forEach((val, i) => {
++          if (i === 0) ctx.moveTo(getX(i), getY(val));
++          else ctx.lineTo(getX(i), getY(val));
++        });
++        ctx.stroke();
++
++        // 3. 绘制填充阴影
++        ctx.lineTo(getX(data.length - 1), zeroY);
++        ctx.lineTo(getX(0), zeroY);
++        const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
++        gradient.addColorStop(0, 'rgba(108, 99, 255, 0.2)');
++        gradient.addColorStop(1, 'rgba(108, 99, 255, 0)');
++        ctx.fillStyle = gradient;
++        ctx.fill();
++
++        // 4. 绘制关键点
++        const maxVal = Math.max(...data);
++        const minVal = Math.min(...data);
++        const maxIndex = data.indexOf(maxVal);
++        const minIndex = data.indexOf(minVal);
++
++        data.forEach((val, i) => {
++          ctx.beginPath();
++          ctx.fillStyle = val >= 0 ? '#e74c3c' : '#27ae60';
++          ctx.arc(getX(i), getY(val), 4, 0, Math.PI * 2);
++          ctx.fill();
++
++          ctx.font = 'bold 12px sans-serif';
++          // 最后一个点显示数值
++          if (i === data.length - 1) {
++            ctx.fillStyle = '#333';
++            ctx.fillText(val, getX(i) - 10, getY(val) - 10);
++          } else if (i === maxIndex && val !== 0) {
++            // 标注最高点
++            ctx.fillStyle = '#e74c3c';
++            ctx.fillText('Max ' + val, getX(i) - 20, getY(val) - 10);
++          } else if (i === minIndex && val !== 0) {
++            // 标注最低点
++            ctx.fillStyle = '#27ae60';
++            ctx.fillText('Min ' + val, getX(i) - 20, getY(val) + 18);
++          }
++        });      });
++  },
++
+   onShareAppMessage() {
+     return {
+       title: `快加入我的牌局！房间号：${this.data.roomCode}`,
+diff --git a/pages/room/main.wxml b/pages/room/main.wxml
+index db3720b..e1da8dd 100644
+--- a/pages/room/main.wxml
++++ b/pages/room/main.wxml
+@@ -36,6 +36,7 @@
+         <view class="header-actions">
+           <view class="qr-btn" bindtap="scrollToHistory">历史 📜</view>
+           <view class="qr-btn" bindtap="showQR">二维码 📲</view>
++          <view class="qr-btn" bindtap="showTrendModal">走势 📈</view>
+           <view class="settings" bindtap="onEndGame">结算 📊</view>
+         </view>
+       </view>
+@@ -161,11 +162,42 @@
+     <view class="tab-item {{currentTab === 'income' ? 'active' : ''}}" bindtap="switchTab" data-tab="income">
+       <text class="tab-icon">💰</text> <text>收入</text>
+     </view>
++    <view class="tab-item" bindtap="showTrendModal">
++      <text class="tab-icon">📈</text> <text>走势</text>
++    </view>
+     <view class="tab-item" bindtap="onEndGame">
+       <text class="tab-icon">📊</text> <text>结算</text>
+     </view>
+   </view>
+ 
++  <!-- 8. 走势图弹窗 -->
++  <view class="trend-modal" wx:if="{{showTrend}}">
++    <view class="trend-mask" bindtap="hideTrendModal"></view>
++    <view class="trend-content">
++      <view class="trend-header">
++        <text class="trend-title">积分变动走势</text>
++        <text class="trend-close" bindtap="hideTrendModal">×</text>
++      </view>
++      <view class="trend-body">
++        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
++        <view class="trend-stats">
++          <view class="stat-item">
++            <text class="stat-label">当前总分</text>
++            <text class="stat-val {{myCurrentScore >= 0 ? 'pos' : 'neg'}}">{{myCurrentScore}}</text>
++          </view>
++          <view class="stat-item">
++            <text class="stat-label">单局最高</text>
++            <text class="stat-val pos">+{{myMaxDelta}}</text>
++          </view>
++        </view>
++      </view>
++      <view class="trend-footer">
++        <button class="btn-settle-alt" wx:if="{{isHost}}" bindtap="onEndGame">去结算该房间</button>
++        <button class="btn-close-trend" bindtap="hideTrendModal">关闭</button>
++      </view>
++    </view>
++  </view>
++
+   <!-- 8. 自定义输入弹窗 -->
+   <view class="input-modal" wx:if="{{showInputModal}}">
+     <view class="modal-mask" bindtap="onModalCancel"></view>
+diff --git a/pages/room/main.wxss b/pages/room/main.wxss
+index 00f2960..8099323 100644
+--- a/pages/room/main.wxss
++++ b/pages/room/main.wxss
+@@ -231,6 +231,23 @@
+   margin-top: 10rpx;
+ }
+ 
++/* 走势图弹窗 */
++.trend-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; display: flex; align-items: center; justify-content: center; }
++.trend-mask { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px); }
++.trend-content { position: relative; width: 680rpx; background: #fff; border-radius: 32rpx; overflow: hidden; animation: popIn 0.3s ease-out; display: flex; flex-direction: column; }
++.trend-header { padding: 30rpx 40rpx; display: flex; justify-content: space-between; align-items: center; border-bottom: 1rpx solid #eee; }
++.trend-title { font-size: 30rpx; font-weight: bold; color: #333; }
++.trend-close { font-size: 40rpx; color: #999; padding: 10rpx; }
++.trend-body { padding: 40rpx; display: flex; flex-direction: column; }
++.trend-canvas { width: 100%; height: 400rpx; background: #fcfcfc; border-radius: 12rpx; }
++.trend-stats { display: flex; justify-content: space-around; margin-top: 40rpx; padding: 30rpx; background: #f8f9fa; border-radius: 20rpx; }
++.stat-item { display: flex; flex-direction: column; align-items: center; }
++.stat-label { font-size: 22rpx; color: #999; margin-bottom: 8rpx; }
++.stat-val { font-size: 36rpx; font-weight: bold; }
++.trend-footer { padding: 30rpx 40rpx 50rpx; display: flex; flex-direction: column; gap: 20rpx; }
++.btn-settle-alt { width: 100% !important; height: 88rpx; background: #fef1f0; color: #e74c3c; font-size: 28rpx; border-radius: 44rpx; display: flex; align-items: center; justify-content: center; border: 1rpx solid #ffccc7; font-weight: bold; margin: 0 !important; }
++.btn-close-trend { width: 100% !important; height: 88rpx; background: #6c63ff; color: #fff; font-size: 28rpx; border-radius: 44rpx; display: flex; align-items: center; justify-content: center; margin: 0 !important; }
++
+ /* 自定义输入弹窗 */
+ .input-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 3000; display: flex; align-items: flex-start; justify-content: center; padding-top: 15vh; }
+ .modal-mask { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
+diff --git a/pages/room/result.js b/pages/room/result.js
+index 40b92a6..6f28084 100644
+--- a/pages/room/result.js
++++ b/pages/room/result.js
+@@ -4,7 +4,10 @@ Page({
+   data: {
+     players: [],
+     winner: null,
+-    transfers: []
++    transfers: [],
++    showTrend: false,
++    myCurrentScore: 0,
++    myMaxDelta: 0
+   },
+ 
+   onLoad(options) {
+@@ -28,11 +31,138 @@ Page({
+         players: sorted,
+         winner: sorted[0],
+         transfers: transfers,
+-        tableFee: data.tableFee
++        tableFee: data.tableFee,
++        // 保存原始数据用于走势图
++        allRounds: data.rounds || [],
++        allPlayers: data.players || []
+       });
+     });
+   },
+ 
++  showTrendModal() {
++    const rounds = this.data.allRounds || [];
++    const myNickname = wx.getStorageSync('nickname');
++    
++    // 计算趋势 (正序)
++    const history = [];
++    let currentTotal = 0;
++    let maxDelta = 0;
++
++    // 此时 rounds 是按创建时间倒序排的，我们要 reverse
++    [...rounds].reverse().forEach(round => {
++      // 在 result 页，我们需要根据昵称匹配，因为 myPlayerId 可能已经丢失上下文
++      // 我们在 onLoad 里存了 allPlayers
++      const me = this.data.allPlayers.find(p => p.nickname === myNickname);
++      if (me) {
++        const val = parseInt(round.scores[me._id] || 0);
++        if (val !== 0) {
++          currentTotal += val;
++          if (Math.abs(val) > maxDelta) maxDelta = Math.abs(val);
++          history.push(currentTotal);
++        }
++      }
++    });
++
++    if (history.length === 0) {
++      wx.showToast({ title: '暂无变动数据', icon: 'none' });
++      return;
++    }
++
++    this.setData({
++      showTrend: true,
++      myCurrentScore: currentTotal,
++      myMaxDelta: maxDelta
++    });
++
++    setTimeout(() => {
++      this.drawTrendCanvas(history);
++    }, 300);
++  },
++
++  hideTrendModal() {
++    this.setData({ showTrend: false });
++  },
++
++  drawTrendCanvas(data) {
++    const query = wx.createSelectorQuery();
++    query.select('#trendCanvas')
++      .fields({ node: true, size: true })
++      .exec((res) => {
++        if (!res[0]) return;
++        const canvas = res[0].node;
++        const ctx = canvas.getContext('2d');
++        const width = res[0].width;
++        const height = res[0].height;
++
++        const dpr = wx.getSystemInfoSync().pixelRatio;
++        canvas.width = width * dpr;
++        canvas.height = height * dpr;
++        ctx.scale(dpr, dpr);
++
++        const padding = 40;
++        const chartWidth = width - padding * 2;
++        const chartHeight = height - padding * 2;
++
++        const minScore = Math.min(0, ...data);
++        const maxScore = Math.max(0, ...data);
++        const range = (maxScore - minScore) || 100;
++
++        const getX = (i) => padding + (i / (data.length > 1 ? data.length - 1 : 1)) * chartWidth;
++        const getY = (v) => padding + chartHeight - ((v - minScore) / range) * chartHeight;
++
++        ctx.strokeStyle = '#f0f0f0';
++        ctx.lineWidth = 1;
++        ctx.beginPath();
++        const zeroY = getY(0);
++        ctx.moveTo(padding, zeroY);
++        ctx.lineTo(width - padding, zeroY);
++        ctx.stroke();
++
++        ctx.beginPath();
++        ctx.strokeStyle = '#6c63ff';
++        ctx.lineWidth = 3;
++        ctx.lineJoin = 'round';
++        ctx.lineCap = 'round';
++        data.forEach((val, i) => {
++          if (i === 0) ctx.moveTo(getX(i), getY(val));
++          else ctx.lineTo(getX(i), getY(val));
++        });
++        ctx.stroke();
++
++        ctx.lineTo(getX(data.length - 1), zeroY);
++        ctx.lineTo(getX(0), zeroY);
++        const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
++        gradient.addColorStop(0, 'rgba(108, 99, 255, 0.2)');
++        gradient.addColorStop(1, 'rgba(108, 99, 255, 0)');
++        ctx.fillStyle = gradient;
++        ctx.fill();
++
++        const maxVal = Math.max(...data);
++        const minVal = Math.min(...data);
++        const maxIndex = data.indexOf(maxVal);
++        const minIndex = data.indexOf(minVal);
++
++        data.forEach((val, i) => {
++          ctx.beginPath();
++          ctx.fillStyle = val >= 0 ? '#e74c3c' : '#27ae60';
++          ctx.arc(getX(i), getY(val), 4, 0, Math.PI * 2);
++          ctx.fill();
++          
++          ctx.font = 'bold 12px sans-serif';
++          if (i === data.length - 1) {
++            ctx.fillStyle = '#333';
++            ctx.fillText(val, getX(i) - 10, getY(val) - 10);
++          } else if (i === maxIndex && val !== 0) {
++            ctx.fillStyle = '#e74c3c';
++            ctx.fillText('Max ' + val, getX(i) - 20, getY(val) - 10);
++          } else if (i === minIndex && val !== 0) {
++            ctx.fillStyle = '#27ae60';
++            ctx.fillText('Min ' + val, getX(i) - 20, getY(val) + 18);
++          }
++        });
++      });
++  },
++
+   goHome() {
+     wx.reLaunch({ url: '/pages/index/index' });
+   }
+diff --git a/pages/room/result.wxml b/pages/room/result.wxml
+index 483a489..677a46d 100644
+--- a/pages/room/result.wxml
++++ b/pages/room/result.wxml
+@@ -19,5 +19,35 @@
+     </view>
+   </view>
+ 
+-  <button class="btn-back" bindtap="goHome">回到首页</button>
++  <view class="actions">
++    <button class="btn-trend" bindtap="showTrendModal">📈 查看积分走势</button>
++    <button class="btn-back" bindtap="goHome">回到首页</button>
++  </view>
++
++  <!-- 走势图弹窗 -->
++  <view class="trend-modal" wx:if="{{showTrend}}">
++    <view class="trend-mask" bindtap="hideTrendModal"></view>
++    <view class="trend-content">
++      <view class="trend-header">
++        <text class="trend-title">本局积分走势</text>
++        <text class="trend-close" bindtap="hideTrendModal">×</text>
++      </view>
++      <view class="trend-body">
++        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
++        <view class="trend-stats">
++          <view class="stat-item">
++            <text class="stat-label">我的最终分</text>
++            <text class="stat-val {{myCurrentScore >= 0 ? 'pos' : 'neg'}}">{{myCurrentScore}}</text>
++          </view>
++          <view class="stat-item">
++            <text class="stat-label">单局最高</text>
++            <text class="stat-val pos">+{{myMaxDelta}}</text>
++          </view>
++        </view>
++      </view>
++      <view class="trend-footer">
++        <button class="btn-close-trend" bindtap="hideTrendModal">确定</button>
++      </view>
++    </view>
++  </view>
+ </view>
+diff --git a/pages/room/result.wxss b/pages/room/result.wxss
+index b06a1b9..0615897 100644
+--- a/pages/room/result.wxss
++++ b/pages/room/result.wxss
+@@ -67,10 +67,48 @@
+ .to { font-weight: bold; color: #ff3b30; }
+ .arrow { font-size: 24rpx; color: #8f94a5; }
+ 
+-.btn-back {
++.actions {
+   margin-top: 80rpx;
++  display: flex;
++  flex-direction: column;
++  gap: 24rpx;
++}
++
++.btn-trend {
++  background: #6c63ff;
++  color: #fff;
++  border-radius: 50rpx;
++  font-size: 30rpx;
++  font-weight: bold;
++}
++
++.btn-back {
+   background: #3e4459;
+   color: #fff;
+   border-radius: 50rpx;
+   font-size: 30rpx;
+ }
++
++/* 走势图弹窗 */
++.trend-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; display: flex; align-items: center; justify-content: center; color: #333; }
++.trend-mask { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); }
++.trend-content { position: relative; width: 680rpx; background: #fff; border-radius: 32rpx; overflow: hidden; animation: popIn 0.3s ease-out; display: flex; flex-direction: column; }
++.trend-header { padding: 30rpx 40rpx; display: flex; justify-content: space-between; align-items: center; border-bottom: 1rpx solid #eee; }
++.trend-title { font-size: 28rpx; font-weight: bold; color: #333; }
++.trend-close { font-size: 40rpx; color: #999; padding: 10rpx; }
++.trend-body { padding: 40rpx; display: flex; flex-direction: column; }
++.trend-canvas { width: 100%; height: 400rpx; background: #fcfcfc; border-radius: 12rpx; }
++.trend-stats { display: flex; justify-content: space-around; margin-top: 40rpx; padding: 30rpx; background: #f8f9fa; border-radius: 20rpx; }
++.stat-item { display: flex; flex-direction: column; align-items: center; }
++.stat-label { font-size: 22rpx; color: #999; margin-bottom: 8rpx; }
++.stat-val { font-size: 36rpx; font-weight: bold; }
++.trend-footer { padding: 0 40rpx 50rpx; }
++.btn-close-trend { width: 100% !important; height: 88rpx; background: #6c63ff; color: #fff; font-size: 28rpx; border-radius: 44rpx; display: flex; align-items: center; justify-content: center; margin: 0 !important; }
++
++@keyframes popIn {
++  from { transform: scale(0.8); opacity: 0; }
++  to { transform: scale(1); opacity: 1; }
++}
++
++.pos { color: #e74c3c; }
++.neg { color: #27ae60; }

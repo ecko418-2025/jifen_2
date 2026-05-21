@@ -31,9 +31,15 @@ Page({
     if (options.roomId) {
       wx.navigateTo({ url: `/pages/room/main?id=${options.roomId}` })
     } else if (options.scene) {
-      // 处理小程序码扫码进入（scene 参数是 roomId）
-      const roomId = decodeURIComponent(options.scene)
-      wx.navigateTo({ url: `/pages/room/main?id=${roomId}` })
+      // 处理小程序码扫码进入
+      const sceneVal = decodeURIComponent(options.scene)
+      if (sceneVal.startsWith('L_')) {
+        // 如果是以 L_ 开头，说明是后台登录扫码，跳转到授权登录页
+        wx.navigateTo({ url: `/pages/admin/login?ticket=${sceneVal}` })
+      } else {
+        // 否则认为是普通的 roomId 进入房间
+        wx.navigateTo({ url: `/pages/room/main?id=${sceneVal}` })
+      }
     }
 
     this.refreshHomeData()
@@ -269,8 +275,11 @@ Page({
         const val = res.result
         if (!val) return
         
-        // 如果是 6 位纯数字，按房间号进入
-        if (/^\d{6}$/.test(val)) {
+        if (val.startsWith('L_')) {
+          // 如果是后台登录普通二维码，跳转到授权登录页
+          wx.navigateTo({ url: `/pages/admin/login?ticket=${val}` })
+        } else if (/^\d{6}$/.test(val)) {
+          // 如果是 6 位纯数字，按房间号进入
           this.enterByCode(val)
         } else {
           // 否则尝试作为 roomId 直接跳转

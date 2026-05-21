@@ -36,6 +36,7 @@
         <view class="header-actions">
           <view class="qr-btn" bindtap="scrollToHistory">历史 📜</view>
           <view class="qr-btn" bindtap="showQR">二维码 📲</view>
+          <view class="qr-btn" bindtap="showTrendModal">走势 📈</view>
           <view class="settings" bindtap="onEndGame">结算 📊</view>
         </view>
       </view>
@@ -161,8 +162,57 @@
     <view class="tab-item {{currentTab === 'income' ? 'active' : ''}}" bindtap="switchTab" data-tab="income">
       <text class="tab-icon">💰</text> <text>收入</text>
     </view>
+    <view class="tab-item" bindtap="showTrendModal">
+      <text class="tab-icon">📈</text> <text>走势</text>
+    </view>
     <view class="tab-item" bindtap="onEndGame">
       <text class="tab-icon">📊</text> <text>结算</text>
+    </view>
+  </view>
+
+  <!-- 8. 走势图弹窗 -->
+  <view class="trend-modal" wx:if="{{showTrend}}">
+    <view class="trend-mask" bindtap="hideTrendModal"></view>
+    <view class="trend-content">
+      <view class="trend-header">
+        <view class="trend-tabs">
+          <view class="trend-tab {{trendType === 'me' ? 'active' : ''}}" bindtap="switchTrendType" data-type="me">本人</view>
+          <view class="trend-tab {{trendType === 'all' ? 'active' : ''}}" bindtap="switchTrendType" data-type="all">所有人</view>
+        </view>
+        <text class="trend-close" bindtap="hideTrendModal">×</text>
+      </view>
+      <view class="trend-body">
+        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
+        <view class="trend-legend" wx:if="{{trendType === 'all'}}">
+          <view class="legend-item" wx:for="{{trendLegend}}" wx:key="name">
+            <view class="legend-color" style="background-color: {{item.color}}"></view>
+            <text class="legend-name">{{item.name}}</text>
+          </view>
+        </view>
+        <view class="trend-stats" wx:if="{{trendType === 'me'}}">
+          <view class="stat-item">
+            <text class="stat-label">当前总分</text>
+            <text class="stat-val {{myCurrentScore >= 0 ? 'pos' : 'neg'}}">{{myCurrentScore}}</text>
+          </view>
+          <view class="stat-item">
+            <text class="stat-label">单局最高</text>
+            <text class="stat-val pos">+{{myMaxDelta}}</text>
+          </view>
+        </view>
+        <view class="trend-stats" wx:if="{{trendType === 'all'}}">
+          <view class="stat-item">
+            <text class="stat-label">全场最高</text>
+            <text class="stat-val pos">{{allMaxScore > 0 ? '+' : ''}}{{allMaxScore}}</text>
+          </view>
+          <view class="stat-item">
+            <text class="stat-label">全场最低</text>
+            <text class="stat-val neg">{{allMinScore}}</text>
+          </view>
+        </view>
+      </view>
+      <view class="trend-footer">
+        <button class="btn-close-trend" bindtap="hideTrendModal">关闭</button>
+      </view>
     </view>
   </view>
 

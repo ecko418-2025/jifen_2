@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>狼人杀积分管理后台</title>
-    <!-- 引入腾讯云开发完整版 Web SDK -->
-    <script src="https://imgcache.qq.com/qcloud/cloudbase-js-sdk/1.5.0/cloudbase.full.js"></script>
+    <!-- 引入腾讯云开发 2.0.0 JS SDK 官方 CDN 地址 -->
+    <script src="https://static.cloudbase.net/cloudbase-js-sdk/2.17.3/cloudbase.full.js"></script>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
 </head>
@@ -30,6 +30,7 @@
             </nav>
             <div class="sidebar-footer">
                 <p>Environment: <span id="env-id">加载中...</span></p>
+                <button id="logout-btn" class="logout-btn">🚪 退出登录</button>
             </div>
         </aside>
 
@@ -69,6 +70,66 @@
             <div class="modal-actions">
                 <button id="cancel-btn" class="btn-secondary">取消</button>
                 <button id="save-btn" class="btn-primary">确认保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录遮罩层，默认显示 -->
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-box">
+            <div class="login-header">
+                <span class="login-logo-icon">🐺</span>
+                <h2>狼人杀积分助手</h2>
+                <p class="login-subtitle">后台管理系统</p>
+            </div>
+            
+            <div class="login-tabs">
+                <div id="tab-password" class="login-tab active" onclick="switchLoginTab('password')">密码登录</div>
+                <div id="tab-qrcode" class="login-tab" onclick="switchLoginTab('qrcode')">扫码登录</div>
+            </div>
+            
+            <!-- 密码登录区域 -->
+            <div id="password-login-section" class="login-section">
+                <div class="login-body">
+                    <div class="login-input-group">
+                        <label for="login-username">管理员账号</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">👤</span>
+                            <input type="text" id="login-username" placeholder="请输入管理员账号" autocomplete="username">
+                        </div>
+                    </div>
+                    
+                    <div class="login-input-group">
+                        <label for="login-password">安全密码</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">🔒</span>
+                            <input type="password" id="login-password" placeholder="请输入登录密码" autocomplete="current-password">
+                        </div>
+                    </div>
+                    
+                    <div id="login-error-msg" class="login-error-msg hidden"></div>
+                    
+                    <button id="login-submit-btn" class="login-submit-btn">登 录</button>
+                </div>
+            </div>
+            
+            <!-- 微信扫码区域 -->
+            <div id="qrcode-login-section" class="login-section hidden">
+                <div class="qrcode-container">
+                    <div id="qrcode-loading" class="qrcode-placeholder">
+                        <div class="qr-spinner"></div>
+                        <p>正在生成小程序码...</p>
+                    </div>
+                    <img id="qrcode-img" class="qrcode-img hidden" src="" alt="小程序登录码">
+                    <div id="qrcode-success-overlay" class="qrcode-success-overlay hidden">
+                        <span class="success-icon">✓</span>
+                        <p>扫码成功！正在登录...</p>
+                    </div>
+                </div>
+                <div class="qrcode-tips">
+                    <p class="main-tip">请使用微信扫描上方小程序码</p>
+                    <p class="sub-tip">仅限房主管理员扫码授权登录</p>
+                </div>
             </div>
         </div>
     </div>

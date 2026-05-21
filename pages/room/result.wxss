@@ -67,10 +67,48 @@
 .to { font-weight: bold; color: #ff3b30; }
 .arrow { font-size: 24rpx; color: #8f94a5; }
 
-.btn-back {
+.actions {
   margin-top: 80rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.btn-trend {
+  background: #6c63ff;
+  color: #fff;
+  border-radius: 50rpx;
+  font-size: 30rpx;
+  font-weight: bold;
+}
+
+.btn-back {
   background: #3e4459;
   color: #fff;
   border-radius: 50rpx;
   font-size: 30rpx;
 }
+
+/* 走势图弹窗 */
+.trend-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; display: flex; align-items: center; justify-content: center; color: #333; }
+.trend-mask { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); }
+.trend-content { position: relative; width: 680rpx; background: #fff; border-radius: 32rpx; overflow: hidden; animation: popIn 0.3s ease-out; display: flex; flex-direction: column; }
+.trend-header { padding: 30rpx 40rpx; display: flex; justify-content: space-between; align-items: center; border-bottom: 1rpx solid #eee; }
+.trend-title { font-size: 28rpx; font-weight: bold; color: #333; }
+.trend-close { font-size: 40rpx; color: #999; padding: 10rpx; }
+.trend-body { padding: 40rpx; display: flex; flex-direction: column; }
+.trend-canvas { width: 100%; height: 400rpx; background: #fcfcfc; border-radius: 12rpx; }
+.trend-stats { display: flex; justify-content: space-around; margin-top: 40rpx; padding: 30rpx; background: #f8f9fa; border-radius: 20rpx; }
+.stat-item { display: flex; flex-direction: column; align-items: center; }
+.stat-label { font-size: 22rpx; color: #999; margin-bottom: 8rpx; }
+.stat-val { font-size: 36rpx; font-weight: bold; }
+.trend-footer { padding: 0 40rpx 50rpx; }
+.btn-close-trend { width: 100% !important; height: 88rpx; background: #6c63ff; color: #fff; font-size: 28rpx; border-radius: 44rpx; display: flex; align-items: center; justify-content: center; margin: 0 !important; }
+
+@keyframes popIn {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.pos { color: #e74c3c; }
+.neg { color: #27ae60; }
