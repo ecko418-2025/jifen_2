@@ -917,10 +917,18 @@ Page({
               throw new Error((closeRes.result && (closeRes.result.error || closeRes.result.msg)) || '结算失败');
             }
             wx.hideLoading();
-            wx.showToast({ title: '已结束房间' });
-            setTimeout(() => {
-              wx.reLaunch({ url: '/pages/index/index' });
-            }, 800);
+            
+            // 房主结算成功后，跳转到专门的结算结果页，并传递数据
+            wx.navigateTo({
+              url: '/pages/room/result',
+              success: (navRes) => {
+                navRes.eventChannel.emit('acceptDataFromOpenerPage', {
+                  players: this.data.players,
+                  rounds: this.data.rounds,
+                  tableFee: this.data.tableFee
+                });
+              }
+            });
           } catch (e) {
             wx.hideLoading();
             wx.showModal({

@@ -1,166 +1,87 @@
-const { calculateTransfers } = require('../../utils/settle');
-
 Page({
   data: {
     players: [],
     winner: null,
-    transfers: [],
-    showTrend: false,
-    myCurrentScore: 0,
-    myMaxDelta: 0
+    tableFee: 0,
+    isGeneratingReport: false,
+    aiReport: ''
   },
 
   onLoad(options) {
     const eventChannel = this.getOpenerEventChannel();
     // 获取从主页面传来的最终分数数据
     eventChannel.on('acceptDataFromOpenerPage', (data) => {
-      const playersForSettle = [...data.players];
-      // 如果有台面费结余，将其作为虚拟收款方参与结算，以保证平账
-      if (data.tableFee > 0) {
-        playersForSettle.push({ 
-          nickname: '台面 (结余)', 
-          current_score: data.tableFee,
-          is_virtual: true 
-        });
-      }
-      
       const sorted = [...data.players].sort((a, b) => b.current_score - a.current_score);
-      const transfers = calculateTransfers(playersForSettle);
-      
+
       this.setData({
         players: sorted,
         winner: sorted[0],
-        transfers: transfers,
-        tableFee: data.tableFee,
-        // 保存原始数据用于走势图
-        allRounds: data.rounds || [],
-        allPlayers: data.players || []
+        tableFee: data.tableFee
       });
+
+      // 触发 AI 生成战报
+      this.generateAIReport(sorted, data.tableFee);
     });
   },
 
-  showTrendModal() {
-    const rounds = this.data.allRounds || [];
-    const myNickname = wx.getStorageSync('nickname');
-    
-    // 计算趋势 (正序)
-    const history = [];
-    let currentTotal = 0;
-    let maxDelta = 0;
+  async generateAIReport(players, tableFee) {
+    this.setData({ isGeneratingReport: true, aiReport: '' });
 
-    // 此时 rounds 是按创建时间倒序排的，我们要 reverse
-    [...rounds].reverse().forEach(round => {
-      // 在 result 页，我们需要根据昵称匹配，因为 myPlayerId 可能已经丢失上下文
-      // 我们在 onLoad 里存了 allPlayers
-      const me = this.data.allPlayers.find(p => p.nickname === myNickname);
-      if (me) {
-        const val = parseInt(round.scores[me._id] || 0);
-        if (val !== 0) {
-          currentTotal += val;
-          if (Math.abs(val) > maxDelta) maxDelta = Math.abs(val);
-          history.push(currentTotal);
+    try {
+      // 1. 拼接动态数据
+      let dataStr = "本局数据：";
+      players.forEach(p => {
+        if (!p.is_virtual || p.nickname.indexOf('台面') === -1) {
+           const action = p.current_score >= 0 ? '赢了' : '输了';
+           dataStr += `[${p.nickname}]${action}${Math.abs(p.current_score)}，`;
         }
+      });
+      if (tableFee > 0) {
+        dataStr += `大家凑的台面费共计：${tableFee}。`;
+      }
+
+      // 2. 设定 Prompt
+      const systemPrompt = "你是一个资深牌友，很会阴阳怪气。请根据我提供的本局打牌得分数据，写一段80字左右的牌局总结。要求：重点夸奖赢家是赌神/雀神，狠狠调侃输得最惨的人；如果有台面费，顺便提一嘴这是大家的‘茶水钱/场地费’；语气要幽默、接地气，极具嘲讽拉满，适合发微信群。";
+
+      // 3. 调用 AI 模型 (需确保基础库版本支持)
+      if (!wx.cloud || !wx.cloud.extend || !wx.cloud.extend.AI) {
+         throw new Error("当前基础库版本过低，不支持 AI 功能");
+      }
+
+      const model = wx.cloud.extend.AI.createModel("hunyuan-exp");
+      const res = await model.generateText({
+        model: "hunyuan-2.0-instruct-20251111",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: dataStr }
+        ],
+      });
+
+      if (res && res.choices && res.choices.length > 0) {
+        this.setData({ 
+          aiReport: res.choices[0].message.content,
+          isGeneratingReport: false 
+        });
+      } else {
+        throw new Error("AI 返回数据异常");
+      }
+    } catch (e) {
+      console.error("AI 战报生成失败:", e);
+      this.setData({ 
+        isGeneratingReport: false,
+        aiReport: '' // 留空则显示错误提示
+      });
+    }
+  },
+
+  copyReport() {
+    if (!this.data.aiReport) return;
+    wx.setClipboardData({
+      data: this.data.aiReport,
+      success: () => {
+        wx.showToast({ title: '已复制，快去群里嘲讽吧！', icon: 'none' });
       }
     });
-
-    if (history.length === 0) {
-      wx.showToast({ title: '暂无变动数据', icon: 'none' });
-      return;
-    }
-
-    this.setData({
-      showTrend: true,
-      myCurrentScore: currentTotal,
-      myMaxDelta: maxDelta
-    });
-
-    setTimeout(() => {
-      this.drawTrendCanvas(history);
-    }, 300);
-  },
-
-  hideTrendModal() {
-    this.setData({ showTrend: false });
-  },
-
-  drawTrendCanvas(data) {
-    const query = wx.createSelectorQuery();
-    query.select('#trendCanvas')
-      .fields({ node: true, size: true })
-      .exec((res) => {
-        if (!res[0]) return;
-        const canvas = res[0].node;
-        const ctx = canvas.getContext('2d');
-        const width = res[0].width;
-        const height = res[0].height;
-
-        const dpr = wx.getSystemInfoSync().pixelRatio;
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
-        ctx.scale(dpr, dpr);
-
-        const padding = 40;
-        const chartWidth = width - padding * 2;
-        const chartHeight = height - padding * 2;
-
-        const minScore = Math.min(0, ...data);
-        const maxScore = Math.max(0, ...data);
-        const range = (maxScore - minScore) || 100;
-
-        const getX = (i) => padding + (i / (data.length > 1 ? data.length - 1 : 1)) * chartWidth;
-        const getY = (v) => padding + chartHeight - ((v - minScore) / range) * chartHeight;
-
-        ctx.strokeStyle = '#f0f0f0';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        const zeroY = getY(0);
-        ctx.moveTo(padding, zeroY);
-        ctx.lineTo(width - padding, zeroY);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.strokeStyle = '#6c63ff';
-        ctx.lineWidth = 3;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        data.forEach((val, i) => {
-          if (i === 0) ctx.moveTo(getX(i), getY(val));
-          else ctx.lineTo(getX(i), getY(val));
-        });
-        ctx.stroke();
-
-        ctx.lineTo(getX(data.length - 1), zeroY);
-        ctx.lineTo(getX(0), zeroY);
-        const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
-        gradient.addColorStop(0, 'rgba(108, 99, 255, 0.2)');
-        gradient.addColorStop(1, 'rgba(108, 99, 255, 0)');
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        const maxVal = Math.max(...data);
-        const minVal = Math.min(...data);
-        const maxIndex = data.indexOf(maxVal);
-        const minIndex = data.indexOf(minVal);
-
-        data.forEach((val, i) => {
-          ctx.beginPath();
-          ctx.fillStyle = val >= 0 ? '#e74c3c' : '#27ae60';
-          ctx.arc(getX(i), getY(val), 4, 0, Math.PI * 2);
-          ctx.fill();
-          
-          ctx.font = 'bold 12px sans-serif';
-          if (i === data.length - 1) {
-            ctx.fillStyle = '#333';
-            ctx.fillText(val, getX(i) - 10, getY(val) - 10);
-          } else if (i === maxIndex && val !== 0) {
-            ctx.fillStyle = '#e74c3c';
-            ctx.fillText('Max ' + val, getX(i) - 20, getY(val) - 10);
-          } else if (i === minIndex && val !== 0) {
-            ctx.fillStyle = '#27ae60';
-            ctx.fillText('Min ' + val, getX(i) - 20, getY(val) + 18);
-          }
-        });
-      });
   },
 
   goHome() {

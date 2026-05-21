@@ -8,46 +8,40 @@
     </view>
   </view>
 
-  <view class="transfer-section">
-    <text class="section-title">💡 最优平账方案 (只需 {{transfers.length}} 次转账)</text>
-    <view wx:for="{{transfers}}" wx:key="index" class="transfer-item">
-      <view class="p-info">
-        <text class="from">{{item.from}}</text>
-        <text class="arrow">支付 ¥{{item.amount}} 给</text>
-        <text class="to">{{item.to}}</text>
+  <!-- AI 战报区域 -->
+  <view class="ai-report-section">
+    <view class="ai-header">
+      <text class="ai-icon">🤖</text>
+      <text class="ai-title">AI 毒舌战报</text>
+    </view>
+    <view class="ai-content {{isGeneratingReport ? 'loading' : ''}}">
+      <text wx:if="{{isGeneratingReport}}" class="ai-typing">正在为您撰写高情商战报...</text>
+      <text wx:elif="{{aiReport}}" class="ai-text" user-select="true">{{aiReport}}</text>
+      <text wx:else class="ai-error">战报生成失败，请稍后重试</text>
+    </view>
+    <view class="ai-footer" wx:if="{{!isGeneratingReport && aiReport}}">
+      <button class="btn-copy" bindtap="copyReport">复制发群里</button>
+    </view>
+  </view>
+
+  <view class="summary-section">
+    <text class="section-title">📊 最终结算清单</text>
+    <view class="summary-list">
+      <view class="summary-item" wx:for="{{players}}" wx:key="_id" wx:if="{{!item.is_virtual || item.nickname.indexOf('台面') === -1}}">
+        <text class="s-name">{{item.nickname}}</text>
+        <text class="s-score {{item.current_score > 0 ? 'pos' : (item.current_score < 0 ? 'neg' : 'zero')}}">
+          {{item.current_score > 0 ? '+' : ''}}{{item.current_score}}
+        </text>
+      </view>
+      <!-- 台面费单列 -->
+      <view class="summary-item table-fee-item" wx:if="{{tableFee > 0}}">
+        <text class="s-name">💰 台面 (结余)</text>
+        <text class="s-score table-score">{{tableFee}}</text>
       </view>
     </view>
   </view>
 
   <view class="actions">
-    <button class="btn-trend" bindtap="showTrendModal">📈 查看积分走势</button>
     <button class="btn-back" bindtap="goHome">回到首页</button>
-  </view>
-
-  <!-- 走势图弹窗 -->
-  <view class="trend-modal" wx:if="{{showTrend}}">
-    <view class="trend-mask" bindtap="hideTrendModal"></view>
-    <view class="trend-content">
-      <view class="trend-header">
-        <text class="trend-title">本局积分走势</text>
-        <text class="trend-close" bindtap="hideTrendModal">×</text>
-      </view>
-      <view class="trend-body">
-        <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
-        <view class="trend-stats">
-          <view class="stat-item">
-            <text class="stat-label">我的最终分</text>
-            <text class="stat-val {{myCurrentScore >= 0 ? 'pos' : 'neg'}}">{{myCurrentScore}}</text>
-          </view>
-          <view class="stat-item">
-            <text class="stat-label">单局最高</text>
-            <text class="stat-val pos">+{{myMaxDelta}}</text>
-          </view>
-        </view>
-      </view>
-      <view class="trend-footer">
-        <button class="btn-close-trend" bindtap="hideTrendModal">确定</button>
-      </view>
-    </view>
   </view>
 </view>

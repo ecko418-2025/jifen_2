@@ -1,33 +1,35 @@
 .result-container {
   padding: 60rpx 40rpx;
-  background: #0f111a;
+  background: #f8f8f8;
   min-height: 100vh;
-  color: #fff;
+  color: #333;
 }
 
 .podium {
   text-align: center;
-  margin-bottom: 80rpx;
+  margin-bottom: 60rpx;
 }
 
 .congrats {
   font-size: 32rpx;
-  color: #8f94a5;
+  color: #666;
+  font-weight: bold;
 }
 
 .winner-card {
-  background: linear-gradient(135deg, #ffcc00, #ff9500);
+  background: linear-gradient(135deg, #fffbeb, #ffecd2);
   border-radius: 40rpx;
   padding: 60rpx;
   margin-top: 40rpx;
-  box-shadow: 0 20rpx 40rpx rgba(255, 149, 0, 0.3);
-  color: #000;
+  box-shadow: 0 10rpx 30rpx rgba(255, 149, 0, 0.15);
+  color: #333;
+  border: 1rpx solid #ffe4b5;
 }
 
 .label {
   font-size: 24rpx;
   font-weight: bold;
-  opacity: 0.8;
+  color: #e67e22;
   display: block;
 }
 
@@ -36,36 +38,161 @@
   font-weight: bold;
   display: block;
   margin: 10rpx 0;
+  color: #000;
 }
 
 .winner-score {
   font-size: 60rpx;
   font-weight: 800;
+  color: #e74c3c;
+}
+
+/* AI 战报样式 */
+.ai-report-section {
+  background: #fff;
+  border-radius: 24rpx;
+  padding: 30rpx;
+  margin-bottom: 40rpx;
+  border: 1rpx solid #eee;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.05);
+}
+
+.ai-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20rpx;
+}
+
+.ai-icon {
+  font-size: 36rpx;
+  margin-right: 12rpx;
+}
+
+.ai-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #6c63ff;
+  letter-spacing: 2rpx;
+}
+
+.ai-content {
+  background: #f8f9fa;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  min-height: 120rpx;
+  display: flex;
+  align-items: center;
+  border: 1rpx dashed rgba(108, 99, 255, 0.3);
+}
+
+.ai-content.loading {
+  justify-content: center;
+}
+
+.ai-typing {
+  color: #6c63ff;
+  font-size: 26rpx;
+  font-style: italic;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+.ai-text {
+  font-size: 28rpx;
+  line-height: 1.6;
+  color: #333;
+}
+
+.ai-error {
+  color: #e74c3c;
+  font-size: 26rpx;
+}
+
+.ai-footer {
+  margin-top: 20rpx;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-copy {
+  background: rgba(108, 99, 255, 0.1);
+  color: #6c63ff;
+  border: 1rpx solid rgba(108, 99, 255, 0.2);
+  font-size: 24rpx;
+  padding: 8rpx 24rpx;
+  border-radius: 30rpx;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.btn-copy:active {
+  background: rgba(108, 99, 255, 0.2);
 }
 
 .section-title {
-  font-size: 26rpx;
-  color: #8f94a5;
-  margin-bottom: 30rpx;
+  font-size: 28rpx;
+  color: #666;
+  margin-bottom: 20rpx;
   display: block;
 }
 
-.transfer-item {
-  background: #1a1d29;
+/* 结算清单区域 */
+.summary-section {
+  background: #fff;
+  border-radius: 24rpx;
   padding: 30rpx;
-  border-radius: 20rpx;
-  margin-bottom: 16rpx;
+  margin-bottom: 40rpx;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.05);
+  border: 1rpx solid #eee;
 }
 
-.p-info {
+.summary-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 24rpx 0;
+  border-bottom: 1rpx dashed #f0f0f0;
 }
 
-.from { font-weight: bold; color: #4cd964; }
-.to { font-weight: bold; color: #ff3b30; }
-.arrow { font-size: 24rpx; color: #8f94a5; }
+.summary-item:last-child {
+  border-bottom: none;
+}
+
+.table-fee-item {
+  margin-top: 10rpx;
+  padding-top: 30rpx;
+  border-top: 2rpx solid #f0f0f0;
+  border-bottom: none;
+}
+
+.s-name {
+  font-size: 32rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.s-score {
+  font-size: 36rpx;
+  font-weight: bold;
+}
+
+.table-score {
+  color: #e67e22;
+}
+
+.pos { color: #e74c3c; }
+.neg { color: #27ae60; }
+.zero { color: #999; }
 
 .actions {
   margin-top: 80rpx;
@@ -74,40 +201,11 @@
   gap: 24rpx;
 }
 
-.btn-trend {
-  background: #6c63ff;
-  color: #fff;
-  border-radius: 50rpx;
-  font-size: 30rpx;
-  font-weight: bold;
-}
-
 .btn-back {
   background: #3e4459;
   color: #fff;
   border-radius: 50rpx;
   font-size: 30rpx;
-}
-
-/* 走势图弹窗 */
-.trend-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; display: flex; align-items: center; justify-content: center; color: #333; }
-.trend-mask { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); }
-.trend-content { position: relative; width: 680rpx; background: #fff; border-radius: 32rpx; overflow: hidden; animation: popIn 0.3s ease-out; display: flex; flex-direction: column; }
-.trend-header { padding: 30rpx 40rpx; display: flex; justify-content: space-between; align-items: center; border-bottom: 1rpx solid #eee; }
-.trend-title { font-size: 28rpx; font-weight: bold; color: #333; }
-.trend-close { font-size: 40rpx; color: #999; padding: 10rpx; }
-.trend-body { padding: 40rpx; display: flex; flex-direction: column; }
-.trend-canvas { width: 100%; height: 400rpx; background: #fcfcfc; border-radius: 12rpx; }
-.trend-stats { display: flex; justify-content: space-around; margin-top: 40rpx; padding: 30rpx; background: #f8f9fa; border-radius: 20rpx; }
-.stat-item { display: flex; flex-direction: column; align-items: center; }
-.stat-label { font-size: 22rpx; color: #999; margin-bottom: 8rpx; }
-.stat-val { font-size: 36rpx; font-weight: bold; }
-.trend-footer { padding: 0 40rpx 50rpx; }
-.btn-close-trend { width: 100% !important; height: 88rpx; background: #6c63ff; color: #fff; font-size: 28rpx; border-radius: 44rpx; display: flex; align-items: center; justify-content: center; margin: 0 !important; }
-
-@keyframes popIn {
-  from { transform: scale(0.8); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
 }
 
 .pos { color: #e74c3c; }
