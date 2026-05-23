@@ -4,8 +4,7 @@
     "pages/room/main",
     "pages/room/result",
     "pages/lobby/rank",
-    "pages/history/index",
-    "pages/admin/login"
+    "pages/history/index"
   ],
   "window": {
     "backgroundTextStyle": "light",
