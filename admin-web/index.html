@@ -83,11 +83,6 @@
                 <p class="login-subtitle">后台管理系统</p>
             </div>
             
-            <div class="login-tabs">
-                <div id="tab-password" class="login-tab active" onclick="switchLoginTab('password')">密码登录</div>
-                <div id="tab-qrcode" class="login-tab" onclick="switchLoginTab('qrcode')">扫码登录</div>
-            </div>
-            
             <!-- 密码登录区域 -->
             <div id="password-login-section" class="login-section">
                 <div class="login-body">
@@ -111,29 +106,9 @@
                     
                     <button id="login-submit-btn" class="login-submit-btn">登 录</button>
                 </div>
-            </div>
-            
-            <!-- 微信扫码区域 -->
-            <div id="qrcode-login-section" class="login-section hidden">
-                <div class="qrcode-container">
-                    <div id="qrcode-loading" class="qrcode-placeholder">
-                        <div class="qr-spinner"></div>
-                        <p>正在生成小程序码...</p>
-                    </div>
-                    <img id="qrcode-img" class="qrcode-img hidden" src="" alt="小程序登录码">
-                    <div id="qrcode-success-overlay" class="qrcode-success-overlay hidden">
-                        <span class="success-icon">✓</span>
-                        <p>扫码成功！正在登录...</p>
-                    </div>
-                </div>
-                <div class="qrcode-tips">
-                    <p class="main-tip">请使用微信扫描上方小程序码</p>
-                    <p class="sub-tip">仅限房主管理员扫码授权登录</p>
-                </div>
-            </div>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=1.0.3"></script>
 </body>
 </html>
